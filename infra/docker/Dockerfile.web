@@ -1,0 +1,16 @@
+# apps/web — multi-stage build. Build context must be the repo root.
+FROM node:20-alpine AS build
+WORKDIR /repo
+COPY package.json package-lock.json* ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/shared-types/package.json packages/shared-types/package.json
+COPY packages/design-tokens/package.json packages/design-tokens/package.json
+RUN npm install --workspaces --include-workspace-root
+COPY apps/web apps/web
+COPY packages/shared-types packages/shared-types
+COPY packages/design-tokens packages/design-tokens
+RUN npm run build --workspace=apps/web
+
+FROM nginx:1.27-alpine AS runtime
+COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
+EXPOSE 80

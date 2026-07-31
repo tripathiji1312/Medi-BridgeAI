@@ -1,0 +1,19 @@
+# services/gateway — multi-stage build. Build context must be the repo root.
+FROM node:20-alpine AS build
+WORKDIR /repo
+COPY package.json package-lock.json* ./
+COPY services/gateway/package.json services/gateway/package.json
+COPY packages/shared-types/package.json packages/shared-types/package.json
+RUN npm install --workspaces --include-workspace-root
+COPY services/gateway services/gateway
+COPY packages/shared-types packages/shared-types
+RUN npm run build --workspace=services/gateway
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+COPY --from=build /repo/services/gateway/dist ./dist
+COPY --from=build /repo/services/gateway/node_modules ./node_modules
+COPY --from=build /repo/services/gateway/package.json ./package.json
+ENV NODE_ENV=production
+EXPOSE 4000
+CMD ["node", "dist/server.js"]

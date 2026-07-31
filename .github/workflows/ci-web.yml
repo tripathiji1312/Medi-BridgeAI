@@ -1,0 +1,25 @@
+name: ci-web
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "packages/shared-types/**"
+      - "packages/design-tokens/**"
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run lint --workspace=apps/web
+      - run: npm run test --workspace=apps/web -- --coverage
+      # TODO(Phase 1+): enforce >=90% coverage threshold on new/changed logic
+      # once vitest coverage config lands (Blueprint Section 10, 13.1 stage 2).

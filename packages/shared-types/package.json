@@ -1,0 +1,8 @@
+{
+  "name": "@medibridge/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript contracts shared across apps/web and services/gateway. Python services mirror these via pydantic models kept in parity by hand until an OpenAPI/JSON-Schema generator is introduced (flagged as a future dependency, not added in Phase 0).",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

@@ -1,0 +1,46 @@
+name: ci-services
+
+on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "packages/**"
+  push:
+    branches: [main]
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run lint --workspace=services/gateway
+      - run: npm run test --workspace=services/gateway
+
+  python-services:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [speech-pipeline, clinical-nlp, vision-service, orchestrator]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: mypy app
+      - run: pytest --cov=app --cov-report=term-missing
+      # TODO(Phase 1+): enforce >=90% coverage threshold on new/changed logic
+      # (Blueprint Section 10, 13.1 stage 2) once real business logic lands.
+
+  # TODO(Phase 1+): integration job that spins up docker-compose.dev.yml and
+  # runs cross-service contract tests (Blueprint Section 13.1 stage 3) — not
+  # meaningful until Phase 1's ASR->transcript path exists.
