@@ -5,8 +5,8 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 1 — Core Speech Pipeline (text-only) — done
-- **Last completed task:** Streaming Hindi ASR pipeline (WebSocket, VAD segmentation, partial/final events, latency instrumentation) tested against a pre-recorded fixture and the real faster-whisper model
+- **Current phase:** Phase 1 — Core Speech Pipeline — fully done, including live mic capture
+- **Last completed task:** End-to-end live path: browser mic → gateway WS proxy → speech-pipeline ASR → transcript events back to the browser, with a consent gate and visible error/latency state
 - **Known issues / deferred items:** see "Deferred" under each session entry below
 - **Next recommended task:** Phase 2 — Translation + TTS (MT service HI→EN wired to Phase 1's transcript output, TTS streamed back, confidence scoring v1)
 
@@ -182,6 +182,110 @@
 `/ws/transcribe` (or explicitly defer to Phase 3 — ask the user which), then begin
 Phase 2 (HI→EN machine translation service wired to this session's transcript output,
 TTS streamed back, confidence scoring v1).
+
+---
+
+### Session 3 — 2026-08-01
+
+**What changed — live microphone path closes out Phase 1's "audio capture" item:**
+
+Resolved the ambiguity flagged at the end of Session 2 (wire live mic now vs. defer to
+Phase 3) toward completing it now: Blueprint Section 8 Phase 1 literally lists "Audio
+capture" as the first line item and says "test with pre-recorded fixtures **before**
+live mic," implying live mic is still Phase 1 scope, just sequenced after fixture
+testing — which was already done. Phase 3 is "no UI polish" dashboard work, not basic
+capture. Proceeded without re-asking per Auto Mode guidance (reasonable call, not a
+new external dependency/data-flow decision).
+
+- **`services/gateway`**: added a `/ws/transcribe` WebSocket **proxy** (`src/ws/transcribeProxy.ts`)
+  so client audio routes browser → gateway → speech-pipeline, matching the Blueprint
+  Section 3.1 architecture diagram exactly, instead of having the frontend connect
+  directly to speech-pipeline (which would have bypassed the gateway's "WS session
+  mgmt" ownership per `AGENT_INSTRUCTIONS.md` Section 2 and required rework later).
+  Forwards binary audio frames upstream and JSON transcript events back **verbatim**
+  — no ML/clinical interpretation in the gateway, per the same boundary rule. On
+  upstream connection failure, sends a client-visible `type: "error"` event and closes,
+  rather than hanging. New deps: `@fastify/websocket`, `ws` (mechanical implementation
+  of the already-approved WebSocket transport in Blueprint Section 4, not a new
+  architectural dependency — proceeded without asking).
+- **`apps/web`**: 
+  - `src/audio/pcm.ts` — pure downsampling/PCM16-encoding helpers (no browser API
+    surface, fully unit-testable).
+  - `src/hooks/useAudioCapture.ts` — mic capture via `getUserMedia` + `AudioContext`
+    + `ScriptProcessorNode` (deprecated API, chosen over `AudioWorkletNode` to avoid
+    a separate worklet-module-loading path for Phase 1; flagged as a follow-up
+    migration below), with injectable `getUserMedia`/`createAudioContext` factories
+    so it's testable without a real browser.
+  - `src/services/transcriptSocket.ts` — thin injectable WebSocket wrapper; malformed
+    server messages produce a visible error event instead of throwing/being dropped.
+  - `src/hooks/useLiveTranscript.ts` — combines the two above; recording only starts
+    after an explicit user click (**consent gate**, Blueprint Section 14: informed
+    consent before recording starts).
+  - `src/components/panels/LiveTranscriptPanel.tsx` — minimal (Phase 1: "text-only, no
+    UI polish") consent button, recording/connecting status (`role="status"`), visible
+    error banner (`role="alert"`), and an `aria-live="polite"` transcript list —
+    accessibility live-region requirement (Blueprint Section 2.5) satisfied from the
+    start, not bolted on later. Wired into `App.tsx` below the existing disclaimer.
+  - `packages/shared-types`: added `TranscriptSegment`/`TranscriptEvent` interfaces
+    mirroring `services/speech-pipeline/app/asr/schemas.py`, used by both the gateway
+    proxy's implicit contract and the web client.
+
+**Bugs found and fixed while wiring this up (not part of the original plan):**
+- **Pre-existing Phase 0 bug**: `packages/design-tokens` typed `colorTokens` with
+  `as const`, which made `colorTokens.light` and `colorTokens.dark` structurally
+  incompatible literal types — `ThemeProvider.tsx`'s `colorTokens[mode]` only
+  type-checked because **`npm run build` (real `tsc`) had never been run** in Phase 0,
+  only `vitest` (which doesn't type-check by default). Caught this session when
+  `apps/web`'s build was run for the first time. Fixed by giving `colorTokens` an
+  explicit `Record<ThemeMode, ColorTokens>` type instead of relying on literal
+  inference. **Action taken:** added `npm run build` to `ci-web.yml` (it only ran
+  lint+test before) so this class of bug is caught in CI going forward, and added a
+  `typecheck` script + CI step for `services/gateway` for the same reason (it had an
+  analogous latent `tsconfig`/`rootDir` mismatch that only `tsc -p` surfaced, not
+  `vitest`). **Lesson for future sessions: `vitest`/`pytest` passing is not proof a
+  service type-checks or builds — run the actual build/typecheck command too before
+  calling a phase done.**
+- Two `react-hooks/exhaustive-deps` lint warnings in `useAudioCapture.ts` (fallback
+  functions recreated every render, feeding a `useCallback` dependency array) — fixed
+  by moving the fallbacks into refs, consistent with the existing `onChunkRef` pattern.
+
+**Tests added/passed (all verified green in this environment):**
+- `apps/web`: +14 tests — `pcm.test.ts` (5), `useAudioCapture.test.tsx` (3),
+  `transcriptSocket.test.ts` (3), `LiveTranscriptPanel.test.tsx` (3). Total apps/web:
+  **17/17 green**, plus `npm run build` (real `tsc -b && vite build`) and `npm run lint`
+  both clean.
+- `services/gateway`: +3 tests (`transcribeProxy.test.ts`) covering binary forwarding,
+  event forwarding, and the upstream-unreachable error path (a real `ws` server used
+  as the fake upstream, not a mock, so this is a genuine integration test). Total
+  gateway: **7/7 green**, plus `npm run typecheck`/`build`/`lint` all clean.
+- **Combined this session: 24/24 JS tests green**; Python suite re-verified unchanged
+  and still green (11/11, mypy/ruff clean across all four services).
+
+**Deferred (explicitly, with reason):**
+- **`ScriptProcessorNode` is deprecated** in favor of `AudioWorkletNode`. Kept for
+  Phase 1 because `AudioWorkletNode` requires loading a separate worklet module file
+  (`audioContext.audioWorklet.addModule(url)`), which adds real complexity for a
+  "text-only, no UI polish" phase without changing functional behavior. Migrate before
+  any production pilot — modern browsers still support `ScriptProcessorNode` but may
+  deprecate it further.
+- **No end-to-end manual verification of the real browser mic path** (i.e., no human
+  clicked the consent button in an actual browser against a running gateway +
+  speech-pipeline stack this session) — verified via unit/integration tests with
+  injected fakes only, consistent with this being a headless build environment. Next
+  session with a real browser available should do one manual smoke test.
+- **Audio format assumption**: `useAudioCapture` always downsamples to 16kHz to match
+  `FasterWhisperASRProvider`'s `EXPECTED_SAMPLE_RATE`; if a user's mic/AudioContext
+  reports a rate below 16kHz, `downsampleBuffer` will throw (by design — "no
+  numeric fabrication/silent upsampling," Blueprint Section 11.1) but this hasn't been
+  tested against unusual real hardware sample rates.
+- Everything already deferred in Session 2 (model-based VAD, real spoken-Hindi
+  fixtures, CI latency-budget enforcement, concurrent-session load testing,
+  ASR-extras not in CI) still applies unchanged.
+
+**Next recommended task:** Phase 2 — Translation + TTS: wire an HI→EN MT service
+(`services/speech-pipeline/app/mt`) onto this session's transcript output, stream TTS
+audio back to the other party's client, and add confidence scoring v1 (ASR confidence
+only; MT self-consistency is Phase 4).
 
 ---
 

@@ -1,0 +1,7 @@
+import type { BuildAppOptions } from "../src/app";
+
+/** Shared defaults for tests that don't exercise the transcribe proxy itself. */
+export const TEST_APP_OPTIONS: BuildAppOptions = {
+  jwtSecret: "test-secret",
+  speechPipelineWsUrl: "ws://localhost:0/ws/transcribe",
+};

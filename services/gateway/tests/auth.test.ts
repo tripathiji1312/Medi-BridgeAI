@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app";
 import { signSessionToken } from "../src/auth/jwt";
+import { TEST_APP_OPTIONS } from "./testHelpers";
 
 const SECRET = "test-secret";
 
 describe("auth stub", () => {
   it("rejects requests with no Authorization header", async () => {
-    const app = await buildApp({ jwtSecret: SECRET });
+    const app = await buildApp({ ...TEST_APP_OPTIONS, jwtSecret: SECRET });
     const response = await app.inject({ method: "GET", url: "/session/whoami" });
 
     expect(response.statusCode).toBe(401);
@@ -15,7 +16,7 @@ describe("auth stub", () => {
   });
 
   it("rejects an invalid/expired token rather than silently treating it as anonymous", async () => {
-    const app = await buildApp({ jwtSecret: SECRET });
+    const app = await buildApp({ ...TEST_APP_OPTIONS, jwtSecret: SECRET });
     const response = await app.inject({
       method: "GET",
       url: "/session/whoami",
@@ -28,7 +29,7 @@ describe("auth stub", () => {
   });
 
   it("accepts a validly signed token and exposes the decoded session claims", async () => {
-    const app = await buildApp({ jwtSecret: SECRET });
+    const app = await buildApp({ ...TEST_APP_OPTIONS, jwtSecret: SECRET });
     const token = signSessionToken({ sub: "doctor-1", role: "doctor" }, SECRET, "15m");
 
     const response = await app.inject({

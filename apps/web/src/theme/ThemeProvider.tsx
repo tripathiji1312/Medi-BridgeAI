@@ -1,10 +1,10 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { colorTokens, type ThemeMode } from "@medibridge/design-tokens";
+import { colorTokens, type ColorTokens, type ThemeMode } from "@medibridge/design-tokens";
 
 interface ThemeContextValue {
   mode: ThemeMode;
   toggle: () => void;
-  colors: (typeof colorTokens)["light"];
+  colors: ColorTokens;
 }
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);

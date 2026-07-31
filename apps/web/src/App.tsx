@@ -1,5 +1,6 @@
 import { ThemeProvider, useTheme } from "./theme/ThemeProvider";
 import { HealthStatus } from "./components/shared/HealthStatus";
+import { LiveTranscriptPanel } from "./components/panels/LiveTranscriptPanel";
 
 function Shell() {
   const { colors, mode, toggle } = useTheme();
@@ -19,6 +20,7 @@ function Shell() {
 
       <main style={{ padding: 16 }}>
         <HealthStatus />
+        <LiveTranscriptPanel />
       </main>
     </div>
   );

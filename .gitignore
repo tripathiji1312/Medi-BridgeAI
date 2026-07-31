@@ -11,10 +11,12 @@ __pycache__/
 .ruff_cache/
 venv/
 .venv/
+.venv*/
 *.egg-info/
 .DS_Store
 Thumbs.db
 *.log
 .vite/
+*.tsbuildinfo
 playwright-report/
 test-results/

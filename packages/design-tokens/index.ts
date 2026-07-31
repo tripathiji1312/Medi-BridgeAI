@@ -4,7 +4,27 @@
 
 export type ThemeMode = "light" | "dark";
 
-export const colorTokens = {
+export interface ColorTokens {
+  background: string;
+  surface: string;
+  primary: string;
+  primaryContrast: string;
+  textPrimary: string;
+  textSecondary: string;
+  border: string;
+  success: string;
+  warning: string;
+  danger: string;
+  confidenceGreen: string;
+  confidenceYellow: string;
+  confidenceRed: string;
+}
+
+// Typed as Record<ThemeMode, ColorTokens> (not `as const`) so `light` and
+// `dark` share one structural type -- `as const` would infer each variant's
+// exact string literals, making colorTokens[mode] fail to type-check
+// wherever `mode` isn't statically known (e.g. ThemeProvider's useState).
+export const colorTokens: Record<ThemeMode, ColorTokens> = {
   light: {
     background: "#F7FAFC",
     surface: "#FFFFFF",
@@ -36,7 +56,7 @@ export const colorTokens = {
     confidenceYellow: "#E0B23A",
     confidenceRed: "#E5645A",
   },
-} as const;
+};
 
 export const spacingTokens = {
   xs: "4px",

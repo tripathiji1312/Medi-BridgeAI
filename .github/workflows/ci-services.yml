@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - run: npm install
       - run: npm run lint --workspace=services/gateway
+      - run: npm run typecheck --workspace=services/gateway
       - run: npm run test --workspace=services/gateway
 
   python-services:
