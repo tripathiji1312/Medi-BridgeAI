@@ -10,6 +10,12 @@ python_version = "3.11"
 module = ["faster_whisper", "faster_whisper.*", "numpy", "numpy.*"]
 ignore_missing_imports = true
 
+# transformers/torch live in requirements-mt.txt (optional, heavy -- same
+# rationale as requirements-asr.txt above).
+[[tool.mypy.overrides]]
+module = ["transformers", "transformers.*", "torch", "torch.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 

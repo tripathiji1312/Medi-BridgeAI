@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.mt.schemas import TranslationSegment
+from app.tts.schemas import TTSAudioSegment
+
 
 class TranscriptSegment(BaseModel):
     model_config = {"strict": True}
@@ -35,3 +38,15 @@ class TranscriptEvent(BaseModel):
     # Latency instrumentation (Blueprint Section 8 Phase 1: "Latency
     # instrumentation from day one"; Section 6.1 budget: partials <300ms).
     latency_ms: float | None = None
+
+    # Phase 2 additions. Only populated on final events (Blueprint Section 8
+    # Phase 2 scope: MT/TTS run on the finalized transcript, not partials --
+    # translating unstable text would waste compute and show flickering
+    # output). translation_error/tts_error are populated independently of
+    # each other and of `error` above, so a translation-service outage still
+    # delivers the raw Hindi transcript (Section 7.2 degraded-mode rule)
+    # rather than blocking the whole event.
+    translation: TranslationSegment | None = None
+    translation_error: str | None = None
+    tts: TTSAudioSegment | None = None
+    tts_error: str | None = None

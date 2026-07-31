@@ -2,13 +2,15 @@ from fastapi import FastAPI
 
 from app.asr.provider_factory import get_asr_provider
 from app.health import HealthResponse
+from app.mt.provider_factory import get_mt_provider
 from app.routes.transcribe_ws import create_transcribe_router
+from app.tts.provider_factory import get_tts_provider
 
 SERVICE_NAME = "speech-pipeline"
 SERVICE_VERSION = "0.1.0"
 
 app = FastAPI(title=SERVICE_NAME)
-app.include_router(create_transcribe_router(get_asr_provider))
+app.include_router(create_transcribe_router(get_asr_provider, get_mt_provider, get_tts_provider))
 
 
 @app.get("/health", response_model=HealthResponse)

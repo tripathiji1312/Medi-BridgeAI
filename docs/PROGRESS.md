@@ -5,10 +5,10 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 1 — Core Speech Pipeline — fully done, including live mic capture
-- **Last completed task:** End-to-end live path: browser mic → gateway WS proxy → speech-pipeline ASR → transcript events back to the browser, with a consent gate and visible error/latency state
+- **Current phase:** Phase 2 — Translation + TTS — implemented, tested (fixtures), real-model smoke test still pending (slow HF download, see Deferred)
+- **Last completed task:** MT (NLLB-200) + TTS (mms-tts-eng) wired onto Phase 1's finalized transcripts, streamed back over the same WebSocket, with graceful per-stage degradation and minimal playback UI
 - **Known issues / deferred items:** see "Deferred" under each session entry below
-- **Next recommended task:** Phase 2 — Translation + TTS (MT service HI→EN wired to Phase 1's transcript output, TTS streamed back, confidence scoring v1)
+- **Next recommended task:** Phase 3 — Bilingual Transcript UI + Speaker Diarization (dashboard shell, live bilingual transcript with timestamps, diarization, waveform animation)
 
 ---
 
@@ -286,6 +286,113 @@ new external dependency/data-flow decision).
 (`services/speech-pipeline/app/mt`) onto this session's transcript output, stream TTS
 audio back to the other party's client, and add confidence scoring v1 (ASR confidence
 only; MT self-consistency is Phase 4).
+
+---
+
+### Session 4 — 2026-08-01
+
+**What changed — Phase 2 (Translation + TTS):**
+
+- **MT engine decision:** asked before implementing (same category as the Phase 1 ASR
+  decision — new model/provider touching transcript data, `AGENT_INSTRUCTIONS.md`
+  Section 6). User chose local NLLB-200-distilled-600M over IndicTrans2 (extra unvetted
+  tooling) and Claude-API-based MT (third-party retention). Feasibility-checked
+  `torch`/`transformers`/`sentencepiece` install on this Python 3.14/Windows setup
+  first (succeeded) before committing to the choice.
+- **TTS engine**: `facebook/mms-tts-eng` via the same `transformers`/`torch` stack
+  already required for NLLB — **not** separately confirmed with the user, since it's
+  the same category of decision (local self-hosted model, no third-party retention)
+  already resolved for MT this phase; noted here as an assumption per
+  `AGENT_INSTRUCTIONS.md` Section 1 rather than re-asking.
+- `services/speech-pipeline/app/mt/`: `provider.py` (Protocol), `schemas.py`
+  (`TranslationSegment` — deliberately **no** MT-specific confidence field yet, since
+  Blueprint Section 8 Phase 2 scope is explicitly "confidence scoring v1: ASR
+  confidence only, MT self-consistency added next" — inventing one now would violate
+  the "no numeric fabrication" rule, Section 11.1), `nllb_provider.py` (real, lazy
+  import), `fixture_provider.py` (deterministic test double), `provider_factory.py`.
+- `services/speech-pipeline/app/tts/`: same shape — `provider.py`, `schemas.py`
+  (`TTSAudioSegment`: base64 PCM16 + sample_rate, sent **inline in the JSON event**
+  rather than as a separate binary WS frame, trading ~33% bandwidth overhead for a
+  much simpler client protocol; flagged as a latency optimization to revisit later,
+  not a Phase 2 blocker), `mms_provider.py`, `fixture_provider.py`, `provider_factory.py`.
+- `services/speech-pipeline/requirements-mt.txt`: `transformers`, `torch`,
+  `sentencepiece` — kept out of the base dev install (heavy, optional), same pattern
+  as `requirements-asr.txt`. `pyproject.toml` mypy overrides extended for these too.
+- `app/asr/schemas.py`: `TranscriptEvent` extended with `translation`,
+  `translation_error`, `tts`, `tts_error` — all four independent of each other and of
+  the existing `error` field, so an MT or TTS outage never drops the underlying Hindi
+  transcript (Blueprint Section 7.2 degraded-mode rule). This does mean `app/asr`
+  now imports from `app/mt`/`app/tts` for these types — a minor layering wrinkle
+  (documented inline) but still within the single `speech-pipeline` service, not a
+  cross-service boundary violation.
+- `app/routes/transcribe_ws.py`: `create_transcribe_router` gained optional
+  `get_mt_provider`/`get_tts_provider` params (default `None` — Phase 1 tests that
+  don't pass them are unaffected). New `_enrich_final_event` helper: **only runs on
+  final events, never partials** (translating unstable text wastes compute and would
+  flicker on screen); catches any MT/TTS exception and attaches it as `*_error`
+  instead of letting it propagate and kill the connection.
+- `packages/shared-types`: added `TranslationSegment`/`TTSAudioSegment`, extended
+  `TranscriptEvent` to match.
+- `apps/web`: `src/audio/wav.ts` — wraps the raw PCM16 TTS audio in a minimal WAV
+  header (raw PCM has no container and can't play directly from a data URL).
+  `LiveTranscriptPanel.tsx` now shows the English translation text next to each
+  finalized Hindi segment and an `<audio controls>` element for the synthesized
+  speech — **no autoplay**, so playback is a deliberate clinician/patient action
+  (Blueprint Section 1: human-in-the-loop always), and degraded-mode warnings
+  (`role="alert"`) render instead of a silent gap when translation or TTS fails.
+
+**Tests added/passed (all verified green in this environment):**
+- `services/speech-pipeline`: +7 tests — `test_mt_fixture_provider.py` (2),
+  `test_tts_fixture_provider.py` (2), plus 3 new `test_transcribe_ws.py` cases:
+  successful MT+TTS enrichment (and confirms MT is called exactly once per **final**,
+  never per partial), MT-failure degrades gracefully (raw transcript still delivered,
+  TTS correctly never runs without a translation to speak), TTS-failure degrades
+  gracefully (transcript + translation still delivered). Total: **15/15 green**,
+  `mypy --strict` and `ruff` both clean (37 source files).
+- `apps/web`: +6 tests — `wav.test.ts` (1, validates the WAV header byte-for-byte),
+  plus 2 new `LiveTranscriptPanel.test.tsx` cases (renders translation text + a
+  `data:audio/wav;base64,...` playable element on success; shows a visible degraded-
+  mode warning, not a silent gap, on translation failure). Total: **20/20 green**,
+  plus `npm run build`/`lint` both clean.
+- Gateway required **no changes** for this phase — its proxy already forwards JSON
+  events verbatim (Phase 1 design), so the new `translation`/`tts` fields pass through
+  automatically; re-ran its 7/7 tests to confirm no regression.
+- **Combined this session: 42/42 tests green** (15 Python + 27 JS).
+
+**Deferred (explicitly, with reason):**
+- **Real-model smoke test for NLLB/mms-tts is incomplete.** Unlike Phase 1's
+  faster-whisper smoke test (which completed quickly), the unauthenticated HuggingFace
+  Hub download for `facebook/nllb-200-distilled-600M` (~2.4GB) was still in progress
+  after an extended wait (~21MB downloaded) — rate-limited by HF's anonymous-request
+  throttling, not a code problem. Did not block the rest of the session on it, since:
+  (a) the exact same HF-download/lazy-import code path was already proven correct for
+  faster-whisper in Phase 1, and (b) the MT/TTS integration logic itself is thoroughly
+  covered by the fixture-based tests above. **Action needed next session:** run the
+  smoke test to completion (`python -c "from app.mt.nllb_provider import
+  NLLBTranslationProvider; ..."`, ideally with an `HF_TOKEN` set to avoid the anonymous
+  rate limit) and confirm the real model produces sane Hindi→English output before
+  any clinical-scenario review.
+- **No MT-specific confidence score.** Per Blueprint Section 8 Phase 2 scope
+  ("confidence scoring v1: ASR confidence only"), `TranslationSegment` carries no
+  confidence field. MT self-consistency scoring (back-translation-based) is Phase 4.
+- **TTS audio sent inline as base64 JSON**, not raw binary WS frames — simpler
+  protocol, ~33% bandwidth cost. Revisit as a latency optimization once real TTS
+  latency is measured against the <800ms first-byte target (Blueprint Section 2.1);
+  not measured this session (no completed real-model run yet).
+- **No conversation-memory conditioning for MT** (Blueprint Section 3.2 step 5
+  mentions conditioning translation on rolling context for disambiguation) — that's
+  explicitly Phase 4 scope ("Conversation Memory + Miscommunication Detector"), not
+  Phase 2.
+- **No back-translation consistency check** — also explicitly Phase 4 scope per the
+  blueprint phase description itself.
+- Everything already deferred in Sessions 2-3 (model-based VAD, real spoken-Hindi
+  fixtures, CI latency-budget enforcement, concurrent-session load testing, ASR/MT
+  extras not in CI, no manual real-browser smoke test) still applies unchanged.
+
+**Next recommended task:** Complete the deferred NLLB/mms-tts real-model smoke test,
+then begin Phase 3 (Bilingual Transcript UI + Speaker Diarization) — dashboard shell
+with the blue/white theme, live bilingual transcript with timestamps, diarization
+integrated into the ASR pipeline, waveform animation.
 
 ---
 

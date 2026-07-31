@@ -7,9 +7,12 @@ which is digest-keyed and used for single-call unit tests.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 
 from app.asr.schemas import TranscriptSegment
+from app.mt.schemas import TranslationSegment
+from app.tts.schemas import TTSAudioSegment
 
 
 @dataclass
@@ -31,3 +34,36 @@ class RecordingStubASRProvider:
                 language=self.language,
             )
         ]
+
+
+@dataclass
+class RecordingStubMTProvider:
+    translated_text: str = "stub translation"
+    calls: list[str] = field(default_factory=list)
+    should_fail: bool = False
+
+    def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationSegment:
+        self.calls.append(text)
+        if self.should_fail:
+            raise RuntimeError("MT provider unavailable")
+        return TranslationSegment(
+            text=self.translated_text, source_language=source_lang, target_language=target_lang
+        )
+
+
+@dataclass
+class RecordingStubTTSProvider:
+    audio: bytes = b"\x01\x02\x03\x04"
+    sample_rate: int = 16_000
+    calls: list[str] = field(default_factory=list)
+    should_fail: bool = False
+
+    def synthesize(self, text: str, language: str) -> TTSAudioSegment:
+        self.calls.append(text)
+        if self.should_fail:
+            raise RuntimeError("TTS provider unavailable")
+        return TTSAudioSegment(
+            audio_base64=base64.b64encode(self.audio).decode("ascii"),
+            sample_rate=self.sample_rate,
+            format="pcm16",
+        )

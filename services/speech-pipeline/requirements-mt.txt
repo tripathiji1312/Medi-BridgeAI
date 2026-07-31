@@ -1,0 +1,8 @@
+-r requirements.txt
+# Real MT + TTS model deps -- heavy (torch + model weights downloaded on
+# first use). Kept separate from requirements.txt for the same reason as
+# requirements-asr.txt: ordinary dev/test installs use the fixture
+# providers and stay lightweight; real-model tests are opt-in.
+transformers>=5.14.1,<6.0.0
+torch>=2.13.0,<3.0.0
+sentencepiece>=0.2.2,<1.0.0

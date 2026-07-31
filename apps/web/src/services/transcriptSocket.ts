@@ -33,6 +33,10 @@ export class TranscriptSocket {
           segment: null,
           error: "Received a malformed transcript event from the server",
           latency_ms: null,
+          translation: null,
+          translation_error: null,
+          tts: null,
+          tts_error: null,
         });
       }
     };

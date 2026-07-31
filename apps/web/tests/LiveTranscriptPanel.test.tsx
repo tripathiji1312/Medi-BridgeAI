@@ -152,4 +152,114 @@ describe("LiveTranscriptPanel", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("renders the English translation and a playable audio element when TTS succeeds", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          segment: {
+            text: "mujhe bukhaar hai",
+            is_final: true,
+            confidence: 0.91,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+          translation: { text: "I have a fever", source_language: "hi", target_language: "en" },
+          translation_error: null,
+          tts: { audio_base64: btoa("fake-pcm-bytes"), sample_rate: 16_000, format: "pcm16" },
+          tts_error: null,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("I have a fever")).toBeInTheDocument();
+    });
+    const audioEl = document.querySelector("audio");
+    expect(audioEl).not.toBeNull();
+    expect(audioEl?.getAttribute("src")).toMatch(/^data:audio\/wav;base64,/);
+
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a degraded-mode warning (not a silent gap) when translation fails", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          segment: {
+            text: "mujhe bukhaar hai",
+            is_final: true,
+            confidence: 0.91,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+          translation: null,
+          translation_error: "MT provider unavailable",
+          tts: null,
+          tts_error: null,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("mujhe bukhaar hai")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Translation unavailable: MT provider unavailable/)).toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
 });
