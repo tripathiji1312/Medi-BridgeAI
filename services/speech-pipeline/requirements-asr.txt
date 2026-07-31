@@ -1,0 +1,6 @@
+-r requirements.txt
+# Real ASR model deps -- heavy (compiled CTranslate2 backend + model weights
+# downloaded on first use). Kept separate from requirements.txt so ordinary
+# dev/test workflows (which use app.asr.fixture_provider) stay lightweight.
+faster-whisper==1.2.1
+numpy>=1.26,<3.0

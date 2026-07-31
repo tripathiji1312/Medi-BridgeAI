@@ -2,6 +2,14 @@
 strict = true
 python_version = "3.11"
 
+# faster_whisper/numpy live in requirements-asr.txt (optional, heavy --
+# see that file's comment), not requirements-dev.txt, so mypy can't see
+# their types in a base dev install. Real type-checking of
+# faster_whisper_provider.py happens when the ASR extras are installed.
+[[tool.mypy.overrides]]
+module = ["faster_whisper", "faster_whisper.*", "numpy", "numpy.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 

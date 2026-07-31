@@ -5,10 +5,10 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 0 — Foundations (in progress)
-- **Last completed task:** Repo skeleton + service scaffolds with health checks (this session)
-- **Known issues / deferred items:** see "Deferred" under the session entry below
-- **Next recommended task:** Finish Phase 0 (CI wiring verification, Docker Compose smoke test once Docker is available), then start Phase 1 (Core Speech Pipeline, text-only)
+- **Current phase:** Phase 1 — Core Speech Pipeline (text-only) — done
+- **Last completed task:** Streaming Hindi ASR pipeline (WebSocket, VAD segmentation, partial/final events, latency instrumentation) tested against a pre-recorded fixture and the real faster-whisper model
+- **Known issues / deferred items:** see "Deferred" under each session entry below
+- **Next recommended task:** Phase 2 — Translation + TTS (MT service HI→EN wired to Phase 1's transcript output, TTS streamed back, confidence scoring v1)
 
 ---
 
@@ -50,6 +50,138 @@
 **Git status:** Git was not available at the start of this session (not installed; `winget install Git.Git` initially failed with a network error reaching GitHub release assets — reproduced identically on retry). The user installed Git for Windows separately mid-session; `git init` was run afterward and the Phase 0 tree committed. `node_modules/`, `.venv*/`, and other build artifacts are excluded via `.gitignore` and were confirmed absent from the initial commit (101 files staged, verified no `node_modules`/`.venv` matches in `git status --short`).
 
 **Next recommended task:** Begin Phase 1 (streaming Hindi ASR → raw transcript over WebSocket, tested against pre-recorded audio fixtures before live mic, with latency instrumentation from day one per Blueprint Section 8).
+
+---
+
+### Session 2 — 2026-07-31 (continued)
+
+**What changed — git remote:**
+- User installed Git for Windows independently; confirmed working (`git --version` 2.55.0.windows.3).
+- `git init` run, Phase 0 tree committed (`03c38e2`), remote `origin` set to
+  `https://github.com/yubair69/MediBridgeAI.git`, pushed and tracking `origin/main`
+  (branch renamed `master`→`main` on push per GitHub default).
+
+**What changed — Phase 1 (Core Speech Pipeline, text-only):**
+- **ASR provider decision:** user chose a local open-source model (faster-whisper /
+  CTranslate2 Whisper) over a commercial streaming API, specifically because it needs
+  no third-party data retention agreement (Blueprint Section 6.1 hard constraint) and
+  needs no API key/account provisioning I can't do on the user's behalf. Confirmed via
+  `AskUserQuestion` before implementing, per `AGENT_INSTRUCTIONS.md` Section 6 ("new
+  external API/model call handling patient audio" must be surfaced, not guessed).
+- Feasibility-checked `faster-whisper` on this machine's Python 3.14/Windows setup in a
+  throwaway venv before committing to the choice: installs and imports cleanly, and a
+  real end-to-end smoke test (tiny model, downloaded from Hugging Face Hub) ran against
+  the fixture without error.
+- `services/speech-pipeline/app/asr/`:
+  - `provider.py` — `ASRProvider` Protocol (batch transcribe interface), so the model
+    is swappable without touching routing/session logic (`AGENT_INSTRUCTIONS.md`
+    Section 3.1 abstraction rule).
+  - `schemas.py` — `TranscriptSegment`/`TranscriptEvent` pydantic-strict models;
+    every event always carries `confidence` and (when applicable) `latency_ms` — no
+    AI value ships without its "why" (Rule 1).
+  - `faster_whisper_provider.py` — real provider; imports `faster_whisper`/`numpy`
+    lazily inside `__init__` so importing the module (and `app.main`) never requires
+    the heavy optional dependency to be installed.
+  - `fixture_provider.py` — deterministic digest-keyed test double.
+  - `provider_factory.py` — lazy singleton factory for the real provider; the
+    WebSocket route catches its `RuntimeError` (raised when `faster-whisper` isn't
+    installed) and sends a client-visible `type: "error"` event + closes, instead of
+    crashing the process (Blueprint Section 6.1: "no single ML service outage can
+    crash the session").
+  - `session.py` — `StreamingASRSession`: turns incoming PCM16 chunks into
+    partial/final `TranscriptEvent`s using a plain RMS-energy VAD gate (not a model-
+    based VAD — see Deferred below) to find utterance boundaries; `end_ms` reflects
+    buffered *audio-content* duration, not wall-clock processing time (a fast fixture
+    replay processes near-instantly, so wall-clock elapsed time would be meaningless).
+- `services/speech-pipeline/app/routes/transcribe_ws.py` — `GET /ws/transcribe`
+  WebSocket endpoint, router built via a factory so the provider is injectable
+  (tests inject a stub; `app/main.py` injects the real lazy provider).
+- `services/speech-pipeline/requirements-asr.txt` — new file: `faster-whisper`,
+  `numpy` kept separate from `requirements.txt` so ordinary dev/test installs (which
+  exercise `FixtureASRProvider`/stub providers only) stay lightweight; real-model
+  tests are opt-in, not part of the default `pytest` run.
+- `services/speech-pipeline/pyproject.toml` — added mypy override so
+  `faster_whisper`/`numpy` missing-import errors don't fail strict mypy when the
+  optional ASR extras aren't installed (matches the requirements split above).
+- `services/speech-pipeline/tests/fixtures/` — `generate_fixture.py` + generated
+  `sample_utterance.wav`: a **synthetic** two-tone-burst fixture (not real speech —
+  see Deferred below), engineered so both utterances have >500ms trailing silence and
+  finalize on their own without relying on WebSocket-disconnect flush.
+
+**Tests added/passed (all verified green in this environment):**
+- `test_fixture_provider.py` — 2 tests (digest match, `KeyError` on unregistered audio).
+- `test_session.py` — 3 tests: two utterances finalize from the fixture with
+  `is_final`/`confidence`/`latency_ms` populated; distinct utterance IDs with duration
+  bounds; silence-only audio produces zero events and zero provider calls (no wasted
+  inference on pure silence).
+- `test_transcribe_ws.py` — 2 tests: full WebSocket round trip (fixture streamed in
+  ~100ms client-style chunks, both `final` events received with expected shape); the
+  provider-unavailable path sends a client-visible error event and closes rather than
+  hanging or crashing.
+- `test_health.py` — 1 test (unchanged from Phase 0).
+- **Total: 8/8 tests green** (`pytest -q` in `services/speech-pipeline`), `mypy --strict`
+  and `ruff check` both clean (25 source files checked).
+- Two real bugs were caught and fixed by these tests before commit: (1) utterance
+  `end_ms` was computed from wall-clock elapsed time, which is ~0 for a fast fixture
+  replay — fixed to derive from buffered audio-sample count instead; (2) the original
+  fixture's trailing silence (0.3s) was shorter than the 500ms finalize threshold, so
+  the second utterance never naturally finalized over the WebSocket (only disconnect-
+  triggered flushes do, and those aren't delivered to an already-gone client) — fixed
+  by lengthening the fixture's trailing silence to 0.8s.
+
+**Deferred (explicitly, with reason):**
+- **VAD is a plain RMS-energy gate, not a model-based VAD** (webrtcvad/Silero). Enough
+  to segment the fixture deterministically and keep Phase 1 dependency-light; a
+  proper model-based VAD is Phase 6 (noise/accent robustness) scope per the blueprint,
+  not a Phase 1 blocker.
+- **No real spoken-Hindi audio fixture exists yet.** `sample_utterance.wav` is
+  synthetic (two sine-wave tone bursts), generated because no vetted-license real
+  Hindi audio source and no offline Hindi TTS engine were available in this build
+  environment. It validates pipeline plumbing (VAD segmentation, partial/final event
+  sequencing, latency instrumentation) but **not** ASR accuracy/WER — that requires a
+  real gold-set fixture and belongs in `scripts/model-eval/` per Blueprint Section
+  11.3, which is explicitly out of scope until Phase 1's pipeline exists (it now does).
+  **Action needed:** source or record real (synthetic-consent or fully synthetic-TTS)
+  Hindi medical-consultation audio before any WER/accuracy claim is made.
+  Confirmed with the real `faster-whisper` "tiny" model in this session: it correctly
+  returned zero segments for the synthetic tone fixture (it isn't speech) — proof the
+  real integration path works, not proof of transcription accuracy.
+  - **Live microphone input is not wired yet** — Blueprint Section 8 Phase 1 scope is
+  explicitly "pre-recorded fixtures before live mic"; `apps/web` audio capture
+  (WebRTC/Web Audio API) and the client-side WebSocket connection to
+  `/ws/transcribe` are not implemented this session. Next session should wire
+  `apps/web/src/hooks/useAudioCapture` (per the Section 5 file tree) before moving to
+  Phase 2, or explicitly defer it to land alongside Phase 3's UI work — flag which to
+  the user if ambiguous when picked back up.
+- **Latency budget (ASR partials <300ms, Blueprint Section 6.1) is instrumented but not
+  yet CI-enforced.** `latency_ms` is present on every event (so it's visible/auditable
+  now), but there's no automated perf-budget check in `ci-services.yml` yet — that's
+  Blueprint Section 13.1 stage 7, reasonably deferred until there's a realistic (non-
+  synthetic-tone) audio workload to benchmark against.
+- **Concurrent-connection thread-safety of the shared `FasterWhisperASRProvider`
+  singleton** (one model instance reused across all WebSocket sessions via
+  `lru_cache`) has not been load-tested. Acceptable for Phase 1's single-session
+  text-only scope; flag for Phase 10 (Resilience & Chaos / load testing) if not
+  revisited sooner.
+- **`ci-services.yml` does not install/test the ASR extras** (`requirements-asr.txt`)
+  — CI runs against `FixtureASRProvider`/stub providers only, consistent with keeping
+  CI fast per the split rationale above. A real-model smoke test (like the one run
+  manually this session) could be added as an opt-in/nightly job later.
+
+**Assumptions made on ambiguous points:**
+- Interpreted "streaming Hindi ASR" for Phase 1 as: batch-transcribe-per-utterance
+  (VAD-segmented) with periodic partial re-transcription of the growing buffer, not
+  true token-by-token incremental decoding — faster-whisper doesn't natively support
+  the latter, and Blueprint Section 8 Phase 1 only asks for "raw transcript over
+  WebSocket" with partial+final semantics, not a specific decoding strategy.
+- `PARTIAL_INTERVAL_MS`/`SILENCE_HANG_MS`/`RMS_SPEECH_THRESHOLD` values in
+  `session.py` are reasonable placeholders, not tuned against real speech/noise —
+  flagged for revisit once real audio is available (see VAD/fixture deferrals above).
+
+**Next recommended task:** Wire `apps/web` live microphone capture to
+`/ws/transcribe` (or explicitly defer to Phase 3 — ask the user which), then begin
+Phase 2 (HI→EN machine translation service wired to this session's transcript output,
+TTS streamed back, confidence scoring v1).
 
 ---
 
