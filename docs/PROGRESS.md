@@ -5,8 +5,8 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 2 — Translation + TTS — implemented, tested (fixtures), real-model smoke test still pending (slow HF download, see Deferred)
-- **Last completed task:** MT (NLLB-200) + TTS (mms-tts-eng) wired onto Phase 1's finalized transcripts, streamed back over the same WebSocket, with graceful per-stage degradation and minimal playback UI
+- **Current phase:** Phase 2 — Translation + TTS — done, including real-model verification
+- **Last completed task:** Confirmed the real NLLB-200 model correctly translates Hindi (Devanagari script) to English end-to-end ("मुझे बुखार है" → "I have a fever."); MT+TTS wired onto Phase 1's finalized transcripts with graceful per-stage degradation and minimal playback UI
 - **Known issues / deferred items:** see "Deferred" under each session entry below
 - **Next recommended task:** Phase 3 — Bilingual Transcript UI + Speaker Diarization (dashboard shell, live bilingual transcript with timestamps, diarization, waveform animation)
 
@@ -360,18 +360,28 @@ only; MT self-consistency is Phase 4).
 - **Combined this session: 42/42 tests green** (15 Python + 27 JS).
 
 **Deferred (explicitly, with reason):**
-- **Real-model smoke test for NLLB/mms-tts is incomplete.** Unlike Phase 1's
-  faster-whisper smoke test (which completed quickly), the unauthenticated HuggingFace
-  Hub download for `facebook/nllb-200-distilled-600M` (~2.4GB) was still in progress
-  after an extended wait (~21MB downloaded) — rate-limited by HF's anonymous-request
-  throttling, not a code problem. Did not block the rest of the session on it, since:
-  (a) the exact same HF-download/lazy-import code path was already proven correct for
-  faster-whisper in Phase 1, and (b) the MT/TTS integration logic itself is thoroughly
-  covered by the fixture-based tests above. **Action needed next session:** run the
-  smoke test to completion (`python -c "from app.mt.nllb_provider import
-  NLLBTranslationProvider; ..."`, ideally with an `HF_TOKEN` set to avoid the anonymous
-  rate limit) and confirm the real model produces sane Hindi→English output before
-  any clinical-scenario review.
+- **Real-model NLLB smoke test: completed, with a finding worth recording.** The
+  unauthenticated HuggingFace Hub download (~2.4GB) was slow (rate-limited, not a code
+  problem) but finished later in the same session. The *first* smoke-test run used
+  romanized Hindi ("mujhe bukhaar hai", Latin script) as a quick typing shortcut — the
+  real model **echoed it back unchanged instead of translating**. Investigated rather
+  than shrugged off: traced it to `transformers` 5.14.1 removing `forced_bos_token_id`
+  from `transformers/generation/*` entirely (confirmed via grep — zero matches in the
+  installed package) yet the tokenizer's `src_lang`/`forced_bos_token_id` mechanism
+  still works via a different internal path (verified: the generated sequence's second
+  token was correctly `eng_Latn`, id 256047) — so forcing the target-language tag
+  works fine. The echo was NOT a code bug: NLLB-200 was trained on Hindi in
+  **Devanagari script**; feeding it romanized/Latin-script "Hindi" is out-of-
+  distribution, and the model degenerately copied the input instead of translating
+  gibberish-to-it. Re-ran with real Devanagari input ("मुझे बुखार है") and got a
+  correct, fluent translation: **"I have a fever."** This matters operationally: it's
+  fine, because faster-whisper's real Hindi ASR output is Devanagari script by
+  default, matching what MT will actually receive in production — but it's a reminder
+  that ad-hoc smoke-test inputs must match the real upstream data shape, not just be
+  "close enough for a quick check." `nllb_provider.py` required **no code changes**.
+- **`mms-tts-eng` real-model smoke test: completed.** `MmsTTSProvider.synthesize("I have
+  a fever.", "en")` produced 58,028 bytes of valid PCM16 audio at 16kHz — the full
+  MT→TTS chain has now been verified end-to-end with real models, not just fixtures.
 - **No MT-specific confidence score.** Per Blueprint Section 8 Phase 2 scope
   ("confidence scoring v1: ASR confidence only"), `TranslationSegment` carries no
   confidence field. MT self-consistency scoring (back-translation-based) is Phase 4.
