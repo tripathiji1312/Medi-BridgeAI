@@ -1,0 +1,7 @@
+# Combined requirements for running speech-pipeline with all real (non-fixture)
+# providers -- used by the Docker image, since a container running the fixture
+# providers wouldn't do anything a health check doesn't already cover.
+# Each of these already pulls in requirements.txt, so this is just their union.
+-r requirements-asr.txt
+-r requirements-mt.txt
+-r requirements-diarization.txt

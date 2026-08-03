@@ -5,10 +5,25 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 3 — Bilingual Transcript UI + Speaker Diarization — done, including real-model verification
-- **Last completed task:** Real ECAPA-TDNN speaker diarization (online 2-speaker clustering) wired onto finalized transcripts, verified end-to-end against the fixture audio (two distinct tone bursts correctly clustered as speaker_a/speaker_b, with a repeat correctly re-matched); dashboard shell, per-utterance timestamps, color-coded speaker chips with human-assigned Doctor/Patient roles, and a live waveform/level meter added to apps/web
-- **Known issues / deferred items:** see "Deferred" under each session entry below
-- **Next recommended task:** Phase 4 — Conversation Memory + Miscommunication Detector (rolling context + structured case memory, back-translation consistency check, confidence score v2)
+- **Current phase:** Phase 3 — Bilingual Transcript UI + Speaker Diarization — done; full
+  cross-repo verification pass also done (see Session 4)
+- **Last completed task:** Pre-Phase-4 verification audit — found and fixed 4 real
+  infra-level bugs (CI's `python-services` job was almost certainly failing since
+  Phase 0 due to a missing `pytest-cov` dependency; the Docker image for
+  speech-pipeline never actually installed the real ASR/MT/diarization models; the
+  gateway's Docker Compose entry had no route to reach speech-pipeline by container
+  name; stray `.coverage` files weren't gitignored). Application logic itself was
+  already correct (68/68 tests genuinely green throughout) — these were all "ships
+  but the surrounding infra silently doesn't work" issues.
+- **Known issues / deferred items:** see "Deferred" under each session entry below.
+  Flagged, not fixed, this session: no Playwright E2E specs exist yet despite
+  Blueprint Section 10's Definition of Done requiring one per user-facing feature —
+  `ci-e2e.yml` has said "Phase 3 introduces apps/web/e2e" since Phase 0 and that still
+  hasn't happened.
+- **Next recommended task:** Decide on the Playwright E2E gap above (build now vs.
+  continue deferring with the note intact), then Phase 4 — Conversation Memory +
+  Miscommunication Detector (rolling context + structured case memory, back-
+  translation consistency check, confidence score v2)
 
 ---
 
@@ -545,6 +560,85 @@ Blueprint Section 1 Principle 4 "AI never overwrites the human-readable transcri
 rolling context window + structured case memory injected into MT/NER prompts, back-
 translation (EN→HI) consistency check feeding a composite confidence score v2, and the
 first cut of `services/orchestrator/app/memory`.
+
+---
+
+### Session 4 — 2026-08-01 — Full verification pass before Phase 4
+
+User asked for a thorough correctness audit before continuing, specifically to catch
+anything that would "waste our efforts." Did a fresh (not cached-trust) pass: clean
+`node_modules` reinstall, fresh Python venv, full builds/lints/typechecks/tests for
+every service, a manual line-by-line review of the trickiest recent logic (diarizer
+clustering, the utterance-audio cache keying, the 3-stage enrichment pipeline), a
+field-by-field cross-check of every TS shared-type against its Python pydantic
+counterpart, and a read-through of every CI workflow and Docker file against what the
+code actually does/needs. Found and fixed four real issues -- none affected the
+actual application logic (68/68 tests were genuinely passing before and after), all
+were in the "ships correctly but the surrounding infra lies about it" category:
+
+1. **`ci-services.yml`'s `python-services` job has likely been failing on every push
+   since Phase 0.** It runs `pytest --cov=app --cov-report=term-missing`, but
+   `pytest-cov` was never added to any of the four services' `requirements-dev.txt` --
+   reproduced locally (`unrecognized arguments: --cov=app`, exit 4). Fixed by adding
+   `pytest-cov==6.0.0` to all four `requirements-dev.txt` files and re-verifying the
+   exact CI command passes on all four. This one is a genuine "wasted effort" near-miss:
+   every CI run against this repo (4 pushes so far) was almost certainly red on this
+   job without anyone (human or agent) noticing, since GitHub Actions were never
+   manually checked in-session (no `gh` CLI available, no browser access).
+2. **The Docker image for `speech-pipeline` only ever installed `requirements.txt`**
+   (fixture providers only) -- `faster-whisper`/`transformers`/`torch`/`speechbrain`
+   were never in the image, so every real transcription/translation/TTS/diarization
+   request through `docker compose up` would fail with "model not installed," even
+   though the service would build and pass its health check cleanly. This would have
+   looked like a working deployment right up until someone actually spoke into it.
+   Fixed: added `services/speech-pipeline/requirements-full.txt` (unions
+   `requirements-asr.txt` + `requirements-mt.txt` + `requirements-diarization.txt`),
+   made `Dockerfile.python-service` accept a `REQUIREMENTS_FILE` build arg (default
+   `requirements.txt`, unchanged for the other 3 services), and set
+   `REQUIREMENTS_FILE: requirements-full.txt` for speech-pipeline specifically in
+   `docker-compose.dev.yml`.
+3. **`docker-compose.dev.yml`'s `gateway` service had no `SPEECH_PIPELINE_WS_URL`
+   set**, so it would fall back to its code default `ws://localhost:8001/...` --
+   inside a container, "localhost" resolves to the gateway container itself, not the
+   speech-pipeline container, so the WS proxy would never reach it. Fixed by setting
+   `SPEECH_PIPELINE_WS_URL: ws://speech-pipeline:8001/ws/transcribe` (Compose service
+   name as hostname) and adding `speech-pipeline` to gateway's `depends_on`. Still not
+   smoke-tested end-to-end (Docker remains unavailable in this build environment,
+   confirmed again this session) -- verified by reading, not running.
+4. **`.coverage` files were untracked/ungitignored** -- running the CI-equivalent
+   `pytest --cov` command locally (to verify fix #1) left `.coverage` files in 4
+   service directories that `git status` would have picked up on next commit. Added
+   `.coverage`/`htmlcov/` to `.gitignore`.
+
+Also fixed, lower-stakes: `README.md`'s "Status" line still said "Phase 0" (stale
+since the very first commit) and its setup instructions didn't mention
+`requirements-full.txt` for anyone wanting the real models instead of fixtures.
+`ci-services.yml`'s gateway job ran lint/typecheck/test but not `build` (apps/web's
+CI job does); added it for consistency since `tsconfig.build.json` already exists and
+the command already verified clean locally.
+
+**What was checked and found already correct** (worth recording so it isn't
+re-litigated next session): TS/Python schema field-for-field parity across
+`HealthResponse`, `TranscriptSegment`, `TranslationSegment`, `TTSAudioSegment`,
+`SpeakerAssignment`, and `TranscriptEvent`; the utterance-audio cache is correctly
+keyed by `utterance_id` (not "last emitted"), so the multi-final-per-batch case (which
+the Phase 1 fixture literally exercises) resolves correctly; the 3-stage enrichment
+pipeline (translation → tts → diarization) correctly runs each stage independently
+and only after `push_chunk()` has already populated the audio cache, so there's no
+ordering hazard; every `os.environ.get(...)` / `process.env....` read matches its
+`.env.example` entry name exactly across both gateway and speech-pipeline;
+`pip-audit` and the diarizer's real-model output were re-spot-checked and still hold.
+
+**Deferred, flagged rather than silently skipped:** Blueprint Section 10's Definition
+of Done table requires "at least one Playwright scenario exercises the feature
+end-to-end through the UI" for user-facing features, and `ci-e2e.yml` has said "Phase 3
+introduces apps/web/e2e Playwright specs" since Phase 0 -- but no Playwright specs
+exist yet despite Phase 3 shipping substantial UI (consent gate, live transcript,
+speaker chips, waveform meter). This is a real, not-yet-closed gap against the
+blueprint's own DoD gate, surfaced to the user rather than either silently skipped or
+silently implemented (a real browser-driven E2E suite with mocked mic input is a
+non-trivial chunk of new work, not a quick fix like the four issues above) -- awaiting
+a decision on whether to build it now or continue deferring it with this note intact.
 
 ---
 

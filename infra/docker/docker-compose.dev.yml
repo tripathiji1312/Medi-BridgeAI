@@ -54,11 +54,15 @@ services:
     environment:
       GATEWAY_PORT: 4000
       JWT_SECRET: dev-only-change-me
+      # "localhost" here would resolve to the gateway container itself, not
+      # speech-pipeline -- must be the Compose service name.
+      SPEECH_PIPELINE_WS_URL: ws://speech-pipeline:8001/ws/transcribe
     ports:
       - "4000:4000"
     depends_on:
       - postgres
       - redis
+      - speech-pipeline
 
   speech-pipeline:
     build:
@@ -67,6 +71,10 @@ services:
       args:
         SERVICE_DIR: services/speech-pipeline
         SERVICE_PORT: 8001
+        # Real ASR/MT/diarization models, not just the fixture providers --
+        # see Dockerfile.python-service's comment on REQUIREMENTS_FILE for
+        # why this override matters.
+        REQUIREMENTS_FILE: requirements-full.txt
     ports:
       - "8001:8001"
 

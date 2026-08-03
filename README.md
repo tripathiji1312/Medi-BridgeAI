@@ -11,7 +11,8 @@ Start here:
 
 ## Status
 
-Phase 0 (Foundations) — see `docs/PROGRESS.md` for the current session log.
+Phase 3 (Bilingual Transcript UI + Speaker Diarization) complete — see `docs/PROGRESS.md`
+for the current session log and what's next.
 
 ## Repo layout
 
@@ -42,7 +43,11 @@ cd services/gateway; npm install; npm test
 
 # Each Python service (repeat per service dir)
 cd services/speech-pipeline; python -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -r requirements.txt -r requirements-dev.txt; pytest
+pip install -r requirements-dev.txt; pytest
+
+# speech-pipeline only, to run the *real* ASR/MT/TTS/diarization models
+# instead of the fixture providers the tests use (heavy: pulls in torch):
+pip install -r requirements-full.txt
 ```
 
 ## Non-negotiable principles

@@ -1,13 +1,27 @@
 # Shared template for all Python FastAPI services (speech-pipeline, clinical-nlp,
 # vision-service, orchestrator). Build context must be the repo root.
-# Build with: docker build -f infra/docker/Dockerfile.python-service --build-arg SERVICE_DIR=services/speech-pipeline --build-arg SERVICE_PORT=8001 .
+# Build with: docker build -f infra/docker/Dockerfile.python-service --build-arg SERVICE_DIR=services/speech-pipeline --build-arg SERVICE_PORT=8001 --build-arg REQUIREMENTS_FILE=requirements-full.txt .
+#
+# REQUIREMENTS_FILE defaults to requirements.txt (fixture providers only,
+# small image). speech-pipeline's docker-compose.dev.yml entry overrides this
+# to requirements-full.txt to pull in the real ASR/MT/diarization models --
+# without that override, the container would build and pass its health check
+# but every real transcription/translation/diarization request would fail
+# with "model not installed" (same RuntimeError the fixture-only dev/test
+# venvs raise on purpose), which defeats the point of running it at all.
 ARG SERVICE_DIR
+ARG REQUIREMENTS_FILE=requirements.txt
 
-FROM python:3.11-slim AS base
+FROM python:3.11-slim
 WORKDIR /app
 ARG SERVICE_DIR
-COPY ${SERVICE_DIR}/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+ARG REQUIREMENTS_FILE
+# Wildcard copy, not just $REQUIREMENTS_FILE: requirements-full.txt and
+# the requirements-{asr,mt,diarization}.txt it composes from all `-r` each
+# other plus requirements.txt, so pip needs every one of them present in
+# the build context, not just the one named on the command line.
+COPY ${SERVICE_DIR}/requirements*.txt ./
+RUN pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
 COPY ${SERVICE_DIR}/app ./app
 ARG SERVICE_PORT=8000
 ENV SERVICE_PORT=${SERVICE_PORT}
