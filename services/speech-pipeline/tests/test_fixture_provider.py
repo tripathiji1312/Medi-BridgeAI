@@ -1,6 +1,6 @@
 import pytest
 
-from app.asr.fixture_provider import FixtureASRProvider
+from app.asr.fixture_provider import FixtureASRProvider, StaticASRProvider
 from app.asr.schemas import TranscriptSegment
 
 
@@ -27,3 +27,13 @@ def __digest(audio: bytes) -> str:
     import hashlib
 
     return hashlib.sha256(audio).hexdigest()
+
+
+def test_static_provider_returns_the_same_canned_text_for_any_audio() -> None:
+    provider = StaticASRProvider(text="fixed text", confidence=0.5, language="hi")
+
+    result_a = provider.transcribe(b"\x01\x02" * 100, sample_rate=16_000)
+    result_b = provider.transcribe(b"\xff\xee" * 50, sample_rate=16_000)
+
+    assert result_a[0].text == result_b[0].text == "fixed text"
+    assert result_a[0].confidence == 0.5

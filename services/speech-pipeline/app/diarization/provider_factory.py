@@ -14,6 +14,11 @@ from app.diarization.provider import SpeakerEmbeddingProvider
 
 @lru_cache(maxsize=1)
 def get_embedding_provider() -> SpeakerEmbeddingProvider:
+    if os.environ.get("MEDIBRIDGE_FIXTURE_MODE") == "1":
+        from app.diarization.fixture_provider import StaticEmbeddingProvider
+
+        return StaticEmbeddingProvider()
+
     from app.diarization.ecapa_provider import EcapaEmbeddingProvider
 
     source = os.environ.get("DIARIZATION_MODEL_SOURCE", "speechbrain/spkrec-ecapa-voxceleb")

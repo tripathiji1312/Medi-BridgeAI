@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import type { HealthResponse } from "@medibridge/shared-types";
 import { fetchGatewayHealth } from "../../services/healthClient";
 import { useTheme } from "../../theme/ThemeProvider";
-
-const GATEWAY_URL = "http://localhost:4000";
+import { GATEWAY_HTTP_URL } from "../../config";
 
 const STATUS_LABEL: Record<HealthResponse["status"], string> = {
   ok: "All systems operational",
@@ -21,7 +20,7 @@ export function HealthStatus() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchGatewayHealth(GATEWAY_URL).then((result) => {
+    fetchGatewayHealth(GATEWAY_HTTP_URL).then((result) => {
       if (!cancelled) setHealth(result);
     });
     return () => {

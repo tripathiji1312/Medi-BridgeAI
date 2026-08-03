@@ -1,18 +1,42 @@
 name: ci-e2e
 
-# TODO(Phase 3+): Playwright E2E suite is meaningless before the bilingual
-# transcript UI (Phase 3) exists. This workflow is a placeholder so the file
-# structure from Blueprint Section 5/13 is in place; it currently does nothing
-# beyond a checkout, and is intentionally not wired into required status checks.
+# Playwright E2E suite against real gateway/speech-pipeline processes running
+# in MEDIBRIDGE_FIXTURE_MODE (deterministic canned ASR/MT/TTS/diarization
+# responses -- no model downloads, but a genuine WebSocket round trip
+# through the real application code). Not a required PR status check per
+# Blueprint Section 13.2 (only lint/unit/integration/security/model-eval
+# are) -- runs nightly + on demand per Section 13.1 stage 6.
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *" # nightly, per Blueprint Section 13.1 stage 6
+    - cron: "0 3 * * *" # nightly
 
 jobs:
-  placeholder:
+  e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "No E2E specs yet — Phase 3 introduces apps/web/e2e Playwright specs."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Set up speech-pipeline venv (fixture-mode deps only, no ASR/MT/diarization extras)
+        working-directory: services/speech-pipeline
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - run: npm run e2e --workspace=apps/web
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

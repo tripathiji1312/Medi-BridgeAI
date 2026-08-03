@@ -17,6 +17,13 @@ from app.asr.provider import ASRProvider
 
 @lru_cache(maxsize=1)
 def get_asr_provider() -> ASRProvider:
+    if os.environ.get("MEDIBRIDGE_FIXTURE_MODE") == "1":
+        # Deterministic, no model download -- used to run this real server
+        # for Playwright E2E tests / local dev without pulling faster-whisper.
+        from app.asr.fixture_provider import StaticASRProvider
+
+        return StaticASRProvider()
+
     from app.asr.faster_whisper_provider import FasterWhisperASRProvider
 
     model_size = os.environ.get("ASR_MODEL_SIZE", "small")

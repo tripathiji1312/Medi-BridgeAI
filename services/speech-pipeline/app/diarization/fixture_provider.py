@@ -15,3 +15,16 @@ class FixtureEmbeddingProvider(SpeakerEmbeddingProvider):
         if pcm16_mono not in self._fixtures:
             raise KeyError(f"No fixture registered for audio of length {len(pcm16_mono)}")
         return self._fixtures[pcm16_mono]
+
+
+class StaticEmbeddingProvider(SpeakerEmbeddingProvider):
+    """Always returns the same embedding, regardless of audio content --
+    every utterance resolves to speaker_a. Used to run the real
+    app/main.py server deterministically for E2E tests/local dev without
+    downloading ECAPA-TDNN (see provider_factory.py's MEDIBRIDGE_FIXTURE_MODE
+    switch). Not useful for testing multi-speaker clustering itself --
+    app.diarization.diarizer's own tests use FixtureEmbeddingProvider with
+    distinct vectors for that."""
+
+    def embed(self, pcm16_mono: bytes, sample_rate: int) -> list[float]:
+        return [1.0, 0.0, 0.0]

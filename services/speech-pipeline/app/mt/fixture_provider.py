@@ -21,3 +21,20 @@ class FixtureMTProvider(MTProvider):
             source_language=source_lang,
             target_language=target_lang,
         )
+
+
+class StaticMTProvider(MTProvider):
+    """Always returns the same canned translation, regardless of input text.
+    Used to run the real app/main.py server deterministically for E2E tests/
+    local dev without downloading NLLB (see provider_factory.py's
+    MEDIBRIDGE_FIXTURE_MODE switch)."""
+
+    def __init__(self, translated_text: str = "I have a fever") -> None:
+        self._translated_text = translated_text
+
+    def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationSegment:
+        return TranslationSegment(
+            text=self._translated_text,
+            source_language=source_lang,
+            target_language=target_lang,
+        )

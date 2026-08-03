@@ -11,6 +11,11 @@ from app.tts.provider import TTSProvider
 
 @lru_cache(maxsize=1)
 def get_tts_provider() -> TTSProvider:
+    if os.environ.get("MEDIBRIDGE_FIXTURE_MODE") == "1":
+        from app.tts.fixture_provider import StaticTTSProvider
+
+        return StaticTTSProvider()
+
     from app.tts.mms_provider import MmsTTSProvider
 
     model_name = os.environ.get("TTS_MODEL_NAME", "facebook/mms-tts-eng")

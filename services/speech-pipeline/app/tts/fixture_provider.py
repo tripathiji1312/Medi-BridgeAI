@@ -23,3 +23,24 @@ class FixtureTTSProvider(TTSProvider):
             sample_rate=self._sample_rate,
             format="pcm16",
         )
+
+
+class StaticTTSProvider(TTSProvider):
+    """Always returns the same short canned PCM16 audio, regardless of
+    input text. Used to run the real app/main.py server deterministically
+    for E2E tests/local dev without downloading mms-tts-eng (see
+    provider_factory.py's MEDIBRIDGE_FIXTURE_MODE switch)."""
+
+    def __init__(self, sample_rate: int = 16_000) -> None:
+        self._sample_rate = sample_rate
+        # A fifth of a second of near-silence -- enough for a valid,
+        # audibly-inert <audio> element in the client, not meant to sound
+        # like speech.
+        self._audio = b"\x00\x01" * int(sample_rate * 0.2)
+
+    def synthesize(self, text: str, language: str) -> TTSAudioSegment:
+        return TTSAudioSegment(
+            audio_base64=base64.b64encode(self._audio).decode("ascii"),
+            sample_rate=self._sample_rate,
+            format="pcm16",
+        )

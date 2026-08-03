@@ -48,6 +48,11 @@ pip install -r requirements-dev.txt; pytest
 # speech-pipeline only, to run the *real* ASR/MT/TTS/diarization models
 # instead of the fixture providers the tests use (heavy: pulls in torch):
 pip install -r requirements-full.txt
+
+# E2E (Playwright) -- needs the speech-pipeline .venv above to exist first
+# (requirements-dev.txt is enough; MEDIBRIDGE_FIXTURE_MODE means the real
+# model extras aren't needed for E2E)
+cd apps/web; npx playwright install --with-deps chromium; npm run e2e
 ```
 
 ## Non-negotiable principles

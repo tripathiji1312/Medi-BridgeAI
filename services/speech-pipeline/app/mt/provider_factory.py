@@ -13,6 +13,11 @@ from app.mt.provider import MTProvider
 
 @lru_cache(maxsize=1)
 def get_mt_provider() -> MTProvider:
+    if os.environ.get("MEDIBRIDGE_FIXTURE_MODE") == "1":
+        from app.mt.fixture_provider import StaticMTProvider
+
+        return StaticMTProvider()
+
     from app.mt.nllb_provider import NLLBTranslationProvider
 
     model_name = os.environ.get("MT_MODEL_NAME", "facebook/nllb-200-distilled-600M")

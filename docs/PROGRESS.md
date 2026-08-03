@@ -5,25 +5,20 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 3 — Bilingual Transcript UI + Speaker Diarization — done; full
-  cross-repo verification pass also done (see Session 4)
-- **Last completed task:** Pre-Phase-4 verification audit — found and fixed 4 real
-  infra-level bugs (CI's `python-services` job was almost certainly failing since
-  Phase 0 due to a missing `pytest-cov` dependency; the Docker image for
-  speech-pipeline never actually installed the real ASR/MT/diarization models; the
-  gateway's Docker Compose entry had no route to reach speech-pipeline by container
-  name; stray `.coverage` files weren't gitignored). Application logic itself was
-  already correct (68/68 tests genuinely green throughout) — these were all "ships
-  but the surrounding infra silently doesn't work" issues.
+- **Current phase:** Phase 3 — Bilingual Transcript UI + Speaker Diarization — fully
+  done, including the Playwright E2E gate from Blueprint Section 10's Definition of
+  Done (see Session 4)
+- **Last completed task:** Pre-Phase-4 verification audit (found/fixed 4 real infra
+  bugs — CI's `python-services` job missing `pytest-cov`, the Docker image never
+  installing the real ASR/MT/diarization models, the gateway's Docker Compose entry
+  having no route to speech-pipeline, stray ungitignored `.coverage` files) followed
+  by closing the E2E gap it surfaced: a real Playwright suite (9 specs) now drives an
+  actual browser against real (not mocked) gateway + speech-pipeline processes
+  running in a new deterministic `MEDIBRIDGE_FIXTURE_MODE`, all green.
 - **Known issues / deferred items:** see "Deferred" under each session entry below.
-  Flagged, not fixed, this session: no Playwright E2E specs exist yet despite
-  Blueprint Section 10's Definition of Done requiring one per user-facing feature —
-  `ci-e2e.yml` has said "Phase 3 introduces apps/web/e2e" since Phase 0 and that still
-  hasn't happened.
-- **Next recommended task:** Decide on the Playwright E2E gap above (build now vs.
-  continue deferring with the note intact), then Phase 4 — Conversation Memory +
-  Miscommunication Detector (rolling context + structured case memory, back-
-  translation consistency check, confidence score v2)
+- **Next recommended task:** Phase 4 — Conversation Memory + Miscommunication Detector
+  (rolling context + structured case memory, back-translation consistency check,
+  confidence score v2)
 
 ---
 
@@ -639,6 +634,104 @@ blueprint's own DoD gate, surfaced to the user rather than either silently skipp
 silently implemented (a real browser-driven E2E suite with mocked mic input is a
 non-trivial chunk of new work, not a quick fix like the four issues above) -- awaiting
 a decision on whether to build it now or continue deferring it with this note intact.
+
+---
+
+### Session 4 (continued) — Closing the Playwright E2E gap
+
+User chose to close the E2E gap flagged above rather than continue deferring it.
+Result: a real Playwright suite (9 specs, all green) drives an actual Chromium
+browser against **real, running** gateway + speech-pipeline processes — not mocked
+WebSocket/fetch like the Vitest component tests use — satisfying Blueprint Section
+10's "at least one Playwright scenario exercises the feature end-to-end through the
+UI" for every Phase 0-3 user-facing feature that exists so far.
+
+**Key design decision — `MEDIBRIDGE_FIXTURE_MODE`:** running the real ASR/MT/TTS/
+diarization models for every E2E run would mean multi-GB downloads and (per this
+session's own earlier findings) potentially very slow CPU inference on every CI run
+-- impractical for a test suite meant to run nightly and on demand. Added a new
+`MEDIBRIDGE_FIXTURE_MODE=1` environment variable that every one of speech-pipeline's
+four provider factories (`asr`, `mt`, `tts`, `diarization`) checks *before* falling
+back to their real-model branch; when set, each returns a new `Static*Provider`
+(`StaticASRProvider`, `StaticMTProvider`, `StaticTTSProvider`,
+`StaticEmbeddingProvider`) that returns the same canned, valid response regardless of
+input. This is deliberately distinct from the existing digest/text-keyed
+`Fixture*Provider` classes (which raise `KeyError` on anything unregistered and exist
+for tests that assert on specific inputs) -- the `Static*` providers exist purely so
+the **real** `app/main.py` FastAPI server can boot and answer **any** request
+deterministically, which is what letting Playwright drive a real browser against a
+real server actually requires. Verified the switch itself works both ways: fixture
+mode selects every `Static*Provider` (asserted via `isinstance`), and fixture mode
+*off* still attempts the real provider (asserted via the same `RuntimeError` the
+ASR/MT/TTS/diarization "not installed" path already raises in this dependency-light
+test environment).
+
+**Other fixes required along the way (found by actually trying to build this, not
+anticipated in advance):**
+- **Dark/light mode didn't persist across reload at all** — `ThemeProvider` was
+  plain `useState`, no storage. Blueprint Section 12.4 explicitly lists "Dark/light
+  mode toggle persists across session and reload" as an E2E scenario, so this was a
+  real, shippable gap the E2E work surfaced, not just a testability blocker. Fixed
+  with a `localStorage`-backed initializer + write-on-toggle, wrapped in try/catch
+  (private browsing / disabled storage degrades to the default rather than crashing
+  — not user-facing AI output, so the fail-loud rule doesn't apply here).
+- **The gateway URL was hardcoded to `localhost:4000` in two components with no
+  override mechanism at all.** E2E needs an isolated port (4100) so it can't collide
+  with a real dev server. Rather than a test-only hack, added a proper
+  `apps/web/src/config.ts` reading `VITE_GATEWAY_HTTP_URL`/`VITE_GATEWAY_WS_URL` Vite
+  env vars (defaulting to the original hardcoded values), which is also just a
+  better architecture for real deployment — the app could previously *never* point
+  at a non-default gateway at all. Added `vite-env.d.ts` to type the new env vars.
+- **Vitest silently started trying to run the new Playwright specs as its own
+  tests** — both use `.spec.ts`/`describe`/`test` naming, and vitest's default
+  include glob doesn't distinguish them from its own tests. Caught immediately by
+  re-running `npm run test:js` after adding the E2E suite (3 files failed with
+  "Playwright Test did not expect test.describe() to be called here"). Fixed by
+  explicitly excluding `**/e2e/**` in `vite.config.ts`'s `test.exclude` (had to
+  restate vitest's other default excludes too, since setting this option replaces
+  rather than merges with them — worth remembering for next time this file is
+  touched).
+
+**What was verified, concretely:**
+- `apps/web/e2e/dashboard.spec.ts` (3 specs): dashboard loads with disclaimer/health
+  status/consent button visible; gateway health genuinely reports "operational" via a
+  real HTTP round trip; dark/light toggle survives a full `page.reload()`.
+- `apps/web/e2e/consultation.spec.ts` (3 specs): recording doesn't start pre-consent;
+  clicking consent drives mic capture (via Chromium's
+  `--use-fake-device-for-media-stream` + `--use-file-for-fake-audio-capture` feeding
+  the existing Phase 1 fixture WAV) through a real WebSocket to a real
+  speech-pipeline process and back, rendering the fixture Hindi text, its English
+  translation, and a speaker-confidence chip; stopping returns cleanly to the
+  consent-gated state.
+- `apps/web/e2e/accessibility.spec.ts` (3 specs): the disclaimer is a real ARIA
+  `alert`, not just styled text; the consent button is reachable and operable via
+  Tab+Enter alone (bounded loop, not a real accessibility-tree scan); the transcript
+  list carries `aria-live="polite"`.
+- `playwright.config.ts` orchestrates three real `webServer` entries (speech-pipeline
+  via `uvicorn` from a venv at the README-documented `services/speech-pipeline/.venv`
+  path, gateway via `tsx`, web via `vite`) on non-default ports so a running local
+  dev stack never collides with the E2E run.
+- `.github/workflows/ci-e2e.yml` rewritten from the Phase-0 placeholder to actually
+  set up Python/Node, install Chromium, create the speech-pipeline venv, and run the
+  suite — nightly + on-demand (not a required PR check, matching Blueprint Section
+  13.2's list of required checks, which doesn't include E2E).
+- Full regression pass after all of the above: 34 speech-pipeline + 39 web (Vitest,
+  now correctly excluding e2e/) + 7 gateway tests, all green; 9/9 Playwright specs
+  green; mypy/ruff/tsc/eslint all clean.
+
+**Deferred, explicitly:**
+- The E2E suite covers Phase 0-3 UI only (no login/summary/export flows exist yet to
+  test — Blueprint Section 12.4's full "login → ... → export PDF" scenario isn't
+  buildable until those phases land). Extend `apps/web/e2e/` incrementally as each
+  future phase ships UI, per the Definition of Done, rather than backfilling later.
+- The accessibility spec is a targeted manual check (ARIA roles, keyboard reachability),
+  not an automated accessibility-tree audit (e.g. `@axe-core/playwright`). Flagged as
+  a reasonable follow-up, not added here to avoid scope creep beyond closing the
+  specific gap that was raised.
+- `ci-e2e.yml` is unverified against real GitHub Actions (same standing caveat as
+  every other workflow in this repo — no way to trigger/observe an Actions run from
+  this environment). Verified by running the exact same `npm run e2e` command
+  locally instead, with real server orchestration.
 
 ---
 

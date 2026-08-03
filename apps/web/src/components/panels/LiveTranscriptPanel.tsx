@@ -5,8 +5,7 @@ import { pcm16ToWavDataUrl } from "../../audio/wav";
 import { formatMsAsTimestamp } from "../../utils/time";
 import { WaveformMeter } from "../shared/WaveformMeter";
 import { SpeakerChip } from "../shared/SpeakerChip";
-
-const GATEWAY_WS_URL = "ws://localhost:4000/ws/transcribe";
+import { GATEWAY_WS_URL } from "../../config";
 
 /** Phase 1-3 scope. Playback uses <audio controls> (no autoplay) so the
  * clinician/patient decides when to hear it -- consistent with
