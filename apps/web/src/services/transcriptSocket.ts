@@ -37,6 +37,8 @@ export class TranscriptSocket {
           translation_error: null,
           tts: null,
           tts_error: null,
+          speaker: null,
+          speaker_error: null,
         });
       }
     };

@@ -16,6 +16,12 @@ ignore_missing_imports = true
 module = ["transformers", "transformers.*", "torch", "torch.*"]
 ignore_missing_imports = true
 
+# speechbrain lives in requirements-diarization.txt (optional, heavy -- same
+# rationale as above). torch is already covered by the override above.
+[[tool.mypy.overrides]]
+module = ["speechbrain", "speechbrain.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 

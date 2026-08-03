@@ -20,3 +20,4 @@ Thumbs.db
 *.tsbuildinfo
 playwright-report/
 test-results/
+pretrained_models/

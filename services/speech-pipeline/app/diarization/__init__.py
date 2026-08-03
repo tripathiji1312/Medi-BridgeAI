@@ -1,2 +1,3 @@
-﻿"""Phase 3: Patient vs Doctor speaker diarization. Placeholder package -- no logic yet (Phase 0 scope is health checks only)."""
+﻿"""Speaker diarization: real ECAPA-TDNN embeddings + online 2-speaker
+clustering, local/self-hosted (see diarizer.py, ecapa_provider.py)."""
 

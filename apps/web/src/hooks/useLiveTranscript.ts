@@ -18,6 +18,9 @@ export interface UseLiveTranscriptState {
   isActive: boolean;
   events: TranscriptEvent[];
   error: string | null;
+  /** Live 0-1 mic amplitude, for a waveform/level-meter animation
+   * (Blueprint Section 2.4). 0 whenever not actively recording. */
+  level: number;
   start: () => Promise<void>;
   stop: () => void;
 }
@@ -26,6 +29,7 @@ export function useLiveTranscript(options: UseLiveTranscriptOptions): UseLiveTra
   const [consentGiven, setConsentGiven] = useState(false);
   const [events, setEvents] = useState<TranscriptEvent[]>([]);
   const [socketError, setSocketError] = useState<string | null>(null);
+  const [level, setLevel] = useState(0);
   const socketRef = useRef<TranscriptSocket | null>(null);
 
   const handleChunk = useCallback((chunk: ArrayBuffer) => {
@@ -34,6 +38,7 @@ export function useLiveTranscript(options: UseLiveTranscriptOptions): UseLiveTra
 
   const capture = useAudioCapture({
     onChunk: handleChunk,
+    onLevel: setLevel,
     getUserMedia: options.getUserMedia,
     createAudioContext: options.createAudioContext,
   });
@@ -74,6 +79,7 @@ export function useLiveTranscript(options: UseLiveTranscriptOptions): UseLiveTra
     socketRef.current?.close();
     socketRef.current = null;
     setConsentGiven(false);
+    setLevel(0);
   }, []);
 
   return {
@@ -81,6 +87,7 @@ export function useLiveTranscript(options: UseLiveTranscriptOptions): UseLiveTra
     isActive: capture.isRecording,
     events,
     error: capture.error ?? socketError,
+    level: capture.isRecording ? level : 0,
     start,
     stop,
   };

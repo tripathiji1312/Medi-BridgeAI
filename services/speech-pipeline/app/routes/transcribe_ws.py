@@ -1,6 +1,6 @@
 """WebSocket transcript streaming endpoint (Blueprint Section 3.2 steps 1-7):
-audio in -> Hindi transcript -> (Phase 2) English translation + TTS audio,
-all pushed back over the same connection.
+audio in -> Hindi transcript -> English translation + TTS audio -> speaker
+label, all pushed back over the same connection.
 
 Router is built via a factory so every provider is injectable -- tests pass
 fixtures, app/main.py passes the real (lazy) providers. This keeps each
@@ -18,6 +18,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.asr.provider import ASRProvider
 from app.asr.schemas import TranscriptEvent
 from app.asr.session import StreamingASRSession
+from app.diarization.diarizer import SpeakerDiarizer
+from app.diarization.provider import SpeakerEmbeddingProvider
 from app.mt.provider import MTProvider
 from app.tts.provider import TTSProvider
 
@@ -25,12 +27,14 @@ logger = logging.getLogger(__name__)
 
 MTProviderGetter = Callable[[], MTProvider]
 TTSProviderGetter = Callable[[], TTSProvider]
+EmbeddingProviderGetter = Callable[[], SpeakerEmbeddingProvider]
 
 
 def create_transcribe_router(
     get_provider: Callable[[], ASRProvider],
     get_mt_provider: MTProviderGetter | None = None,
     get_tts_provider: TTSProviderGetter | None = None,
+    get_embedding_provider: EmbeddingProviderGetter | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -51,12 +55,27 @@ def create_transcribe_router(
             return
 
         session = StreamingASRSession(provider)
+        # One diarizer per connection: clustering state (who's "speaker_a"
+        # vs "speaker_b") must not leak across sessions/patients. Built
+        # eagerly (not lazily inside the enrichment call) so a persistently
+        # broken embedding model degrades once per connection, not silently
+        # retries on every utterance.
+        diarizer: SpeakerDiarizer | None = None
+        diarizer_error: str | None = None
+        if get_embedding_provider is not None:
+            try:
+                diarizer = SpeakerDiarizer(get_embedding_provider())
+            except Exception as exc:  # noqa: BLE001 - degrade, don't crash the session
+                logger.exception("diarization unavailable for this session")
+                diarizer_error = str(exc)
 
         try:
             while True:
                 chunk = await websocket.receive_bytes()
                 for event in session.push_chunk(chunk):
-                    event = _enrich_final_event(event, get_mt_provider, get_tts_provider)
+                    event = _enrich_final_event(
+                        event, get_mt_provider, get_tts_provider, session, diarizer, diarizer_error
+                    )
                     await websocket.send_json(event.model_dump())
         except WebSocketDisconnect:
             for event in session.flush():
@@ -77,34 +96,69 @@ def _enrich_final_event(
     event: TranscriptEvent,
     get_mt_provider: MTProviderGetter | None,
     get_tts_provider: TTSProviderGetter | None,
+    session: StreamingASRSession,
+    diarizer: SpeakerDiarizer | None,
+    diarizer_error: str | None,
 ) -> TranscriptEvent:
-    """Runs MT then TTS on a finalized ASR event. Partials are left alone --
-    translating unstable text wastes compute and would flicker on screen.
+    """Runs MT, then TTS, then diarization on a finalized ASR event. Partials
+    are left alone -- translating/diarizing unstable text wastes compute and
+    would flicker on screen.
 
-    A translation/TTS failure never drops the underlying transcript: it's
-    attached as *_error instead, so the client always has the raw Hindi
-    text + ASR confidence even in degraded mode (Blueprint Section 7.2).
+    Each stage's failure is independent and never drops what earlier stages
+    already computed: the client always has at least the raw Hindi text +
+    ASR confidence even in fully degraded mode (Blueprint Section 7.2).
     """
     if event.type != "final" or event.segment is None or not event.segment.text.strip():
         return event
+
+    event = _run_translation(event, get_mt_provider)
+    event = _run_tts(event, get_tts_provider)
+    event = _run_diarization(event, session, diarizer, diarizer_error)
+    return event
+
+
+def _run_translation(event: TranscriptEvent, get_mt_provider: MTProviderGetter | None) -> TranscriptEvent:
     if get_mt_provider is None:
         return event
-
     try:
-        translation = get_mt_provider().translate(event.segment.text, event.segment.language, "en")
-        event = event.model_copy(update={"translation": translation})
+        segment = event.segment
+        assert segment is not None
+        translation = get_mt_provider().translate(segment.text, segment.language, "en")
+        return event.model_copy(update={"translation": translation})
     except Exception as exc:  # noqa: BLE001 - any MT failure degrades, never crashes the session
         logger.exception("translation failed for utterance %s", event.utterance_id)
         return event.model_copy(update={"translation_error": str(exc)})
 
-    if get_tts_provider is None:
-        return event
 
+def _run_tts(event: TranscriptEvent, get_tts_provider: TTSProviderGetter | None) -> TranscriptEvent:
+    if get_tts_provider is None or event.translation is None:
+        return event
     try:
-        tts_segment = get_tts_provider().synthesize(translation.text, translation.target_language)
-        event = event.model_copy(update={"tts": tts_segment})
+        tts_segment = get_tts_provider().synthesize(event.translation.text, event.translation.target_language)
+        return event.model_copy(update={"tts": tts_segment})
     except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
         logger.exception("tts failed for utterance %s", event.utterance_id)
         return event.model_copy(update={"tts_error": str(exc)})
 
-    return event
+
+def _run_diarization(
+    event: TranscriptEvent,
+    session: StreamingASRSession,
+    diarizer: SpeakerDiarizer | None,
+    diarizer_error: str | None,
+) -> TranscriptEvent:
+    if diarizer is None:
+        if diarizer_error is not None:
+            return event.model_copy(update={"speaker_error": diarizer_error})
+        return event
+
+    audio = session.get_utterance_audio(event.utterance_id)
+    if audio is None:
+        return event.model_copy(update={"speaker_error": "utterance audio unavailable for diarization"})
+
+    try:
+        assignment = diarizer.assign_speaker(audio, session.sample_rate)
+        return event.model_copy(update={"speaker": assignment})
+    except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
+        logger.exception("diarization failed for utterance %s", event.utterance_id)
+        return event.model_copy(update={"speaker_error": str(exc)})

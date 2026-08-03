@@ -2,6 +2,10 @@ import { ThemeProvider, useTheme } from "./theme/ThemeProvider";
 import { HealthStatus } from "./components/shared/HealthStatus";
 import { LiveTranscriptPanel } from "./components/panels/LiveTranscriptPanel";
 
+/** Dashboard shell: panels layout (Blueprint Section 2.4/8 Phase 3) --
+ * a status sidebar (model/latency health, consent state) alongside the
+ * main live-transcript panel. Grid, not a component library, to stay
+ * dependency-light per the "no UI polish" scope carried through Phase 3. */
 function Shell() {
   const { colors, mode, toggle } = useTheme();
 
@@ -18,9 +22,38 @@ function Shell() {
         information verbally.
       </div>
 
-      <main style={{ padding: 16 }}>
-        <HealthStatus />
-        <LiveTranscriptPanel />
+      <main
+        style={{
+          display: "grid",
+          gridTemplateColumns: "240px 1fr",
+          gap: 16,
+          padding: 16,
+        }}
+      >
+        <aside
+          aria-label="Session status"
+          style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            padding: 12,
+          }}
+        >
+          <h2 style={{ fontSize: 14, marginTop: 0 }}>System Status</h2>
+          <HealthStatus />
+        </aside>
+
+        <section
+          aria-label="Consultation"
+          style={{
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 8,
+            padding: 16,
+          }}
+        >
+          <LiveTranscriptPanel />
+        </section>
       </main>
     </div>
   );

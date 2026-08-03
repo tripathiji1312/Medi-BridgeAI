@@ -5,10 +5,10 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 2 — Translation + TTS — done, including real-model verification
-- **Last completed task:** Confirmed the real NLLB-200 model correctly translates Hindi (Devanagari script) to English end-to-end ("मुझे बुखार है" → "I have a fever."); MT+TTS wired onto Phase 1's finalized transcripts with graceful per-stage degradation and minimal playback UI
+- **Current phase:** Phase 3 — Bilingual Transcript UI + Speaker Diarization — done, including real-model verification
+- **Last completed task:** Real ECAPA-TDNN speaker diarization (online 2-speaker clustering) wired onto finalized transcripts, verified end-to-end against the fixture audio (two distinct tone bursts correctly clustered as speaker_a/speaker_b, with a repeat correctly re-matched); dashboard shell, per-utterance timestamps, color-coded speaker chips with human-assigned Doctor/Patient roles, and a live waveform/level meter added to apps/web
 - **Known issues / deferred items:** see "Deferred" under each session entry below
-- **Next recommended task:** Phase 3 — Bilingual Transcript UI + Speaker Diarization (dashboard shell, live bilingual transcript with timestamps, diarization, waveform animation)
+- **Next recommended task:** Phase 4 — Conversation Memory + Miscommunication Detector (rolling context + structured case memory, back-translation consistency check, confidence score v2)
 
 ---
 
@@ -403,6 +403,148 @@ only; MT self-consistency is Phase 4).
 then begin Phase 3 (Bilingual Transcript UI + Speaker Diarization) — dashboard shell
 with the blue/white theme, live bilingual transcript with timestamps, diarization
 integrated into the ASR pipeline, waveform animation.
+
+---
+
+### Session 3 — 2026-08-01 — Phase 3: Bilingual Transcript UI + Speaker Diarization
+
+**Diarization approach decision:** user explicitly wants real ML used where reasonable
+("we need ml"), so the earlier `AskUserQuestion` menu (manual toggle / real ML via
+pyannote.audio / two-mic channels) was resolved in favor of real ML, but **not**
+`pyannote.audio`: its diarization pipeline is gated on HuggingFace (license acceptance +
+token I can't provision on the user's behalf). Chose **SpeechBrain's ECAPA-TDNN**
+(`speechbrain/spkrec-ecapa-voxceleb`) instead — an ungated, local/self-hosted speaker-
+embedding model — paired with a lightweight **online 2-speaker clustering** algorithm
+written for this project (not a pretrained diarization pipeline): nearest-centroid
+assignment with a novelty threshold to decide when a second voice is genuinely new,
+capped at 2 speakers (Doctor/Patient) since this is a 2-party consultation, and
+deliberately **not retroactive** (an utterance's label is never rewritten later, per
+Blueprint Section 1 Principle 4 "AI never overwrites the human-readable transcript").
+
+**What changed — backend (`services/speech-pipeline`):**
+- `app/diarization/`: `schemas.py` (`SpeakerAssignment` — content-neutral
+  `speaker_label` + confidence; diarization can tell voices apart but not which is the
+  doctor), `provider.py` (`SpeakerEmbeddingProvider` Protocol), `fixture_provider.py`
+  (digest-keyed test double), `ecapa_provider.py` (real provider), `diarizer.py`
+  (`SpeakerDiarizer` — the online clustering logic, pure Python/math, zero ML
+  dependencies itself so it's fully unit-testable without any model), `provider_factory.py`
+  (lazy singleton for the *embedding model*, which is stateless and shareable — the
+  *diarizer* itself is instantiated fresh per WebSocket connection since its clustering
+  state must never leak across sessions/patients).
+- `app/asr/session.py`: added a bounded (`max 8`) `utterance_id -> audio bytes` cache,
+  populated whenever an utterance finalizes, with a `get_utterance_audio()` accessor.
+  Needed because a single `push_chunk()` call can finalize more than one utterance (a
+  large chunk containing two full utterances back-to-back — exactly what the Phase 1
+  fixture does), so "the last emitted utterance's audio" would have been wrong; keying
+  by utterance_id instead makes the lookup correct regardless of batching.
+- `app/asr/schemas.py`: `TranscriptEvent` gained `speaker`/`speaker_error` (final-only,
+  independently degradable from translation/tts — same pattern as Phase 2).
+- `app/routes/transcribe_ws.py`: refactored `_enrich_final_event` into three independent
+  stages (`_run_translation` → `_run_tts` → `_run_diarization`), each catching its own
+  failures so one stage's outage never blocks stages that already succeeded. The
+  diarizer is constructed once per connection at accept-time (not lazily per-utterance)
+  so a broken embedding model degrades the whole session once, with a clear reason,
+  rather than silently retrying on every utterance.
+- `requirements-diarization.txt`: speechbrain + torch, kept separate from
+  `requirements.txt` (same rationale as `requirements-asr.txt`/`requirements-mt.txt` —
+  heavy optional deps, ordinary test runs use `FixtureEmbeddingProvider`).
+- **Windows-specific fix, worth remembering**: SpeechBrain's `EncoderClassifier.from_hparams`
+  defaults to `LocalStrategy.SYMLINK` for its model cache, which raised
+  `OSError: WinError 1314` (symlink privilege) on this machine. Fixed by passing
+  `local_strategy=LocalStrategy.COPY_SKIP_CACHE` explicitly in `ecapa_provider.py`.
+
+**What changed — frontend (`apps/web`):**
+- `src/audio/pcm.ts`: added `computeRmsLevel` (pure, unit-tested) for a live level meter.
+- `src/hooks/useAudioCapture.ts`: added an optional `onLevel` callback fired alongside
+  `onChunk`, so a waveform/level UI doesn't need its own separate audio tap.
+- `src/hooks/useLiveTranscript.ts`: exposes `level` (0 whenever not actively recording).
+- `src/hooks/useSpeakerRoles.ts`: client-side-only `speaker_label -> Doctor/Patient/
+  Unassigned` map. Not persisted to the server yet — that's orchestrator/session-state
+  territory (Phase 4+); explicitly a human-in-the-loop UI action, never inferred.
+- `src/components/shared/WaveformMeter.tsx`: a bar-meter (not a literal scrolling
+  canvas waveform) driven by `level` — conveys "audio is flowing and how loud" without
+  a canvas renderer, matching the "no UI polish" scope carried through this phase.
+- `src/components/shared/SpeakerChip.tsx`: color-coded chip (new `speakerA`/`speakerB`
+  design tokens, distinct from the semantic success/warning/danger colors) + confidence
+  + a role `<select>` that calls back to the parent rather than assuming its own
+  suggestion was accepted.
+- `src/utils/time.ts`: `formatMsAsTimestamp` for per-utterance timestamps.
+- `App.tsx`: dashboard shell — a status sidebar (health) + main consultation panel,
+  panels-layout grid per Blueprint Section 2.4/8 Phase 3 (not a component library, kept
+  dependency-light).
+- `LiveTranscriptPanel.tsx`: now shows timestamps, the waveform meter, and the speaker
+  chip/role-assignment control per finalized utterance.
+- `packages/design-tokens`: added `speakerA`/`speakerB` color tokens (light + dark).
+- `packages/shared-types`: added `SpeakerAssignment`, extended `TranscriptEvent`.
+
+**Tests added/passed (all verified green in this environment):**
+- `test_diarizer.py` — 5 tests: first utterance seeds speaker_a; a clearly different
+  voice becomes speaker_b; a similar voice groups with the existing speaker rather than
+  spawning a new one; a third voice folds into its nearest existing cluster rather than
+  spawning a speaker_c; labeling is not retroactive (an earlier call keeps its label
+  even after a later near-duplicate updates the centroid).
+- `test_diarization_fixture_provider.py` — 2 tests.
+- `test_transcribe_ws.py` — 3 new tests: successful diarization attaches a speaker
+  assignment to every final; an embedding-extraction failure mid-session still delivers
+  the transcript (degraded, not dropped); the embedding model being unavailable at
+  connection time degrades the whole session with a clear `speaker_error`.
+- Backend total: **25/25 tests green**, `mypy --strict` and `ruff` clean (45 source files).
+- `pcm.test.ts` (+4: `computeRmsLevel`), `useAudioCapture.test.tsx` (+1: `onLevel`),
+  `time.test.ts` (+3), `WaveformMeter.test.tsx` (+2), `SpeakerChip.test.tsx` (+2),
+  `useSpeakerRoles.test.ts` (+3), `LiveTranscriptPanel.test.tsx` (+1: speaker chip +
+  timestamps + role assignment interaction).
+- Frontend total: **43/43 tests green** (apps/web 36 + gateway 7), `tsc -b`/`vite build`
+  and `eslint` both clean on apps/web; gateway `tsc` typecheck and build both clean.
+
+**Real-model verification (not just fixtures):**
+- Confirmed `speechbrain/spkrec-ecapa-voxceleb` loads and extracts a real 192-dimension
+  embedding (after fixing the Windows symlink issue above).
+- Ran the full `SpeakerDiarizer` against the real ECAPA provider on the Phase 1 fixture
+  audio (split into its two tone-burst halves): the two distinct synthetic voices were
+  correctly assigned `speaker_a`/`speaker_b`, and re-running the first half again
+  correctly re-matched `speaker_a` — the real clustering pipeline works end-to-end, not
+  just the fixture-backed unit tests.
+
+**Deferred (explicitly, with reason):**
+- **`NEW_SPEAKER_DISTANCE_THRESHOLD` (0.35 cosine distance) is a qualitative starting
+  point, not tuned against a labeled gold set.** The fixture audio (synthetic tone
+  bursts at very different frequencies) validates the clustering *logic* but says
+  nothing about the right threshold for real human voices, which may be closer together
+  in embedding space (same-gender speakers, similar mic distance, etc.). Action needed:
+  revisit once real multi-speaker consultation audio is available — same caveat already
+  standing for the VAD thresholds since Phase 1.
+- **Speaker role assignment (`useSpeakerRoles`) is client-side-only state**, lost on
+  page reload and not shared with any other client viewing the same session. Acceptable
+  for Phase 3's single-client scope; real persistence is orchestrator/session-state
+  territory, Phase 4+ (`services/orchestrator/app/session`, `app/memory`).
+- **Concurrent-session load behavior of the shared `EcapaEmbeddingProvider` singleton**
+  (one model instance reused across all WebSocket sessions, same pattern as the ASR/MT/
+  TTS singletons) has not been load-tested — same standing deferral as Phase 1/2,
+  flagged again here since diarization adds a third shared-model contention point.
+- **The waveform is a bar-meter, not a literal scrolling waveform.** Matches the
+  "waveform animation" *spirit* (Blueprint Section 2.4) without a canvas renderer, kept
+  deliberately simple for this phase; revisit if the blueprint's Phase 9/UX-polish pass
+  wants a literal waveform.
+- **`pretrained_models/` directory**: SpeechBrain's real-provider smoke test downloaded
+  model weights to a `pretrained_models/` dir at the repo root (its hardcoded default
+  `savedir`). Added to `.gitignore` and deleted from the working tree before commit —
+  not source, should never be committed. If a future session sees this directory
+  reappear locally, that's expected (regenerated on first real-provider use), not a bug.
+
+**Assumptions made on ambiguous points:**
+- Speaker labels are content-neutral (`speaker_a`/`speaker_b`) rather than the model
+  guessing "doctor" vs "patient" — diarization has no signal for that, and guessing
+  would violate Section 1 Principle 4. Role assignment is an explicit clinician UI
+  action. Flagged as the correct interpretation, not a placeholder to fix later.
+- Diarization runs after MT/TTS in the enrichment pipeline (translation → speech →
+  speaker), not before. Order doesn't affect correctness (each stage is independent and
+  keyed off the same finalized segment/translation), but was chosen so a
+  diarization-specific slowdown never delays translation/TTS delivery to the client.
+
+**Next recommended task:** Phase 4 — Conversation Memory + Miscommunication Detector:
+rolling context window + structured case memory injected into MT/NER prompts, back-
+translation (EN→HI) consistency check feeding a composite confidence score v2, and the
+first cut of `services/orchestrator/app/memory`.
 
 ---
 

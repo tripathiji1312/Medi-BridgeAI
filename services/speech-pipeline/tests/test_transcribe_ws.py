@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.routes.transcribe_ws import create_transcribe_router
 from tests.stub_provider import (
     RecordingStubASRProvider,
+    RecordingStubEmbeddingProvider,
     RecordingStubMTProvider,
     RecordingStubTTSProvider,
 )
@@ -31,6 +32,7 @@ def _build_app(
     provider: RecordingStubASRProvider,
     mt_provider: RecordingStubMTProvider | None = None,
     tts_provider: RecordingStubTTSProvider | None = None,
+    get_embedding_provider: Any = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(
@@ -38,6 +40,7 @@ def _build_app(
             lambda: provider,
             (lambda: mt_provider) if mt_provider is not None else None,
             (lambda: tts_provider) if tts_provider is not None else None,
+            get_embedding_provider,
         )
     )
     return app
@@ -166,3 +169,67 @@ def test_tts_failure_still_delivers_transcript_and_translation_degraded_not_drop
         assert event["translation"]["text"] == "fixture translation"
         assert event["tts"] is None
         assert "unavailable" in event["tts_error"]
+
+
+def test_final_events_carry_a_speaker_assignment_when_diarization_succeeds() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    embedding_provider = RecordingStubEmbeddingProvider()
+    app = _build_app(asr_provider, get_embedding_provider=lambda: embedding_provider)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["speaker"]["speaker_label"] in ("speaker_a", "speaker_b")
+        assert 0.0 <= event["speaker"]["confidence"] <= 1.0
+        assert event["speaker_error"] is None
+    # Diarization only runs on finals, same rule as MT/TTS.
+    assert len(embedding_provider.calls) == len(finals)
+
+
+def test_diarization_embedding_failure_still_delivers_transcript_degraded_not_dropped() -> None:
+    class FailingEmbeddingProvider:
+        def embed(self, pcm16_mono: bytes, sample_rate: int) -> list[float]:
+            raise RuntimeError("embedding extraction failed")
+
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    app = _build_app(asr_provider, get_embedding_provider=lambda: FailingEmbeddingProvider())
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"  # raw transcript still present
+        assert event["speaker"] is None
+        assert "extraction failed" in event["speaker_error"]
+
+
+def test_diarization_model_unavailable_at_connection_time_degrades_the_whole_session() -> None:
+    def unavailable_embedding_provider():  # type: ignore[no-untyped-def]
+        raise RuntimeError("speechbrain not installed")
+
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    app = _build_app(asr_provider, get_embedding_provider=unavailable_embedding_provider)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"
+        assert event["speaker"] is None
+        assert "not installed" in event["speaker_error"]

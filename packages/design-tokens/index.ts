@@ -18,6 +18,10 @@ export interface ColorTokens {
   confidenceGreen: string;
   confidenceYellow: string;
   confidenceRed: string;
+  // Speaker diarization colors (Blueprint Section 2.1: "color-coded")
+  // -- distinct from success/warning/danger, which carry status meaning.
+  speakerA: string;
+  speakerB: string;
 }
 
 // Typed as Record<ThemeMode, ColorTokens> (not `as const`) so `light` and
@@ -40,6 +44,8 @@ export const colorTokens: Record<ThemeMode, ColorTokens> = {
     confidenceGreen: "#1E8E3E",
     confidenceYellow: "#B58500",
     confidenceRed: "#C62828",
+    speakerA: "#1565C0",
+    speakerB: "#8E5CC7",
   },
   dark: {
     background: "#0B1420",
@@ -55,6 +61,8 @@ export const colorTokens: Record<ThemeMode, ColorTokens> = {
     confidenceGreen: "#4CBB6F",
     confidenceYellow: "#E0B23A",
     confidenceRed: "#E5645A",
+    speakerA: "#5B9BEA",
+    speakerB: "#B58EE0",
   },
 };
 

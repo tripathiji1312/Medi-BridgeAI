@@ -67,3 +67,18 @@ class RecordingStubTTSProvider:
             sample_rate=self.sample_rate,
             format="pcm16",
         )
+
+
+@dataclass
+class RecordingStubEmbeddingProvider:
+    """Returns a fixed embedding for every call regardless of audio content
+    -- route-level tests care about the diarizer being invoked and wired
+    correctly, not about real clustering (that's app.diarization.diarizer's
+    own unit tests, using FixtureEmbeddingProvider for distinct vectors)."""
+
+    embedding: list[float] = field(default_factory=lambda: [1.0, 0.0, 0.0])
+    calls: list[bytes] = field(default_factory=list)
+
+    def embed(self, pcm16_mono: bytes, sample_rate: int) -> list[float]:
+        self.calls.append(pcm16_mono)
+        return self.embedding

@@ -38,6 +38,22 @@ export function downsampleBuffer(
   return result;
 }
 
+/** RMS amplitude of a frame, normalized to roughly [0, 1] for driving a
+ * live level-meter/waveform animation (Blueprint Section 2.4 "waveform
+ * animations"). Pure so it's unit-testable without a real AudioContext. */
+export function computeRmsLevel(input: Float32Array): number {
+  if (input.length === 0) {
+    return 0;
+  }
+  let sumSquares = 0;
+  for (let i = 0; i < input.length; i++) {
+    const sample = input[i] ?? 0;
+    sumSquares += sample * sample;
+  }
+  const rms = Math.sqrt(sumSquares / input.length);
+  return Math.max(0, Math.min(1, rms * 4)); // *4: RMS of typical speech is well under 1.0; scale for a visibly responsive meter
+}
+
 /** Converts [-1, 1] float samples to little-endian 16-bit PCM, matching
  * FasterWhisperASRProvider's expected input format on the server side. */
 export function floatTo16BitPCM(input: Float32Array): ArrayBuffer {

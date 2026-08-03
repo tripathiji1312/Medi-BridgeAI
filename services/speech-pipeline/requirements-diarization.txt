@@ -1,0 +1,6 @@
+-r requirements.txt
+# Real diarization deps -- heavy (torch + model weights downloaded on first
+# use), same rationale as requirements-asr.txt/requirements-mt.txt: ordinary
+# dev/test installs use FixtureEmbeddingProvider and stay lightweight.
+speechbrain>=1.1.0,<2.0.0
+torch>=2.13.0,<3.0.0

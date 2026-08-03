@@ -73,6 +73,29 @@ class StreamingASRSession:
         self._frame_bytes = frame_byte_size(sample_rate)
         self._buf = bytearray()
         self._utterance: _Utterance | None = None
+        # Bounded cache of finalized utterances' raw audio, keyed by
+        # utterance_id, so callers (e.g. the diarizer) can look up the exact
+        # audio behind a "final" event without threading it through the
+        # public event API. Keyed rather than "last emitted" because a
+        # single push_chunk() call can finalize more than one utterance
+        # (e.g. a large chunk containing two full utterances back to back).
+        self._utterance_audio_cache: dict[str, bytes] = {}
+        self._cache_order: list[str] = []
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    def get_utterance_audio(self, utterance_id: str) -> bytes | None:
+        return self._utterance_audio_cache.get(utterance_id)
+
+    def _cache_utterance_audio(self, utterance_id: str, audio: bytes) -> None:
+        self._utterance_audio_cache[utterance_id] = audio
+        self._cache_order.append(utterance_id)
+        max_cached = 8
+        while len(self._cache_order) > max_cached:
+            oldest = self._cache_order.pop(0)
+            self._utterance_audio_cache.pop(oldest, None)
 
     def push_chunk(self, chunk: bytes) -> list[TranscriptEvent]:
         """Feed raw PCM16 mono bytes; returns zero or more events to send."""
@@ -124,6 +147,9 @@ class StreamingASRSession:
         request_start = time.monotonic()
         segments = self._provider.transcribe(bytes(utterance.audio), self._sample_rate)
         latency_ms = (time.monotonic() - request_start) * 1000
+
+        if is_final:
+            self._cache_utterance_audio(utterance.id, bytes(utterance.audio))
 
         return TranscriptEvent(
             type="final" if is_final else "partial",

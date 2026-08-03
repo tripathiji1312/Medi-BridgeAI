@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { downsampleBuffer, floatTo16BitPCM } from "../src/audio/pcm";
+import { computeRmsLevel, downsampleBuffer, floatTo16BitPCM } from "../src/audio/pcm";
 
 describe("downsampleBuffer", () => {
   it("returns the input unchanged when rates already match", () => {
@@ -38,5 +38,27 @@ describe("floatTo16BitPCM", () => {
 
     expect(view.getInt16(0, true)).toBe(0x7fff);
     expect(view.getInt16(2, true)).toBe(-0x8000);
+  });
+});
+
+describe("computeRmsLevel", () => {
+  it("returns 0 for silence", () => {
+    expect(computeRmsLevel(new Float32Array([0, 0, 0, 0]))).toBe(0);
+  });
+
+  it("returns 0 for an empty frame rather than dividing by zero", () => {
+    expect(computeRmsLevel(new Float32Array([]))).toBe(0);
+  });
+
+  it("returns a higher level for louder audio", () => {
+    const quiet = computeRmsLevel(new Float32Array([0.05, -0.05, 0.05, -0.05]));
+    const loud = computeRmsLevel(new Float32Array([0.5, -0.5, 0.5, -0.5]));
+    expect(loud).toBeGreaterThan(quiet);
+  });
+
+  it("always stays within [0, 1] even for full-scale input", () => {
+    const level = computeRmsLevel(new Float32Array([1, -1, 1, -1]));
+    expect(level).toBeGreaterThanOrEqual(0);
+    expect(level).toBeLessThanOrEqual(1);
   });
 });

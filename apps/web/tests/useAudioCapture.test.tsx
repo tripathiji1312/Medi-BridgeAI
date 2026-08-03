@@ -55,6 +55,32 @@ describe("useAudioCapture", () => {
     expect(chunk.byteLength).toBe(samples.length * 2); // 16kHz in == 16kHz out, no downsampling
   });
 
+  it("reports a live audio level alongside each chunk when onLevel is provided", async () => {
+    const onChunk = vi.fn();
+    const onLevel = vi.fn();
+    const getUserMedia = vi.fn().mockResolvedValue(makeFakeMediaStream());
+    const { context, processor } = makeFakeAudioContext(16_000);
+    const createAudioContext = vi.fn().mockReturnValue(context);
+
+    const { result } = renderHook(() =>
+      useAudioCapture({ onChunk, onLevel, getUserMedia, createAudioContext }),
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    const loudSamples = new Float32Array([0.9, -0.9, 0.9, -0.9]);
+    act(() => {
+      processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => loudSamples } });
+    });
+
+    expect(onLevel).toHaveBeenCalledTimes(1);
+    const level = onLevel.mock.calls[0]?.[0] as number;
+    expect(level).toBeGreaterThan(0);
+    expect(level).toBeLessThanOrEqual(1);
+  });
+
   it("surfaces a reason string when mic permission is denied, rather than failing silently", async () => {
     const onChunk = vi.fn();
     const getUserMedia = vi.fn().mockRejectedValue(new Error("Permission denied"));

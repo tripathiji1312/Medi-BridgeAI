@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { downsampleBuffer, floatTo16BitPCM } from "../audio/pcm";
+import { computeRmsLevel, downsampleBuffer, floatTo16BitPCM } from "../audio/pcm";
 
 const TARGET_SAMPLE_RATE = 16_000;
 const BUFFER_SIZE = 4096;
@@ -26,6 +26,10 @@ export interface ScriptProcessorNodeLike {
 
 export interface UseAudioCaptureOptions {
   onChunk: (chunk: ArrayBuffer) => void;
+  /** Fired alongside onChunk with a 0-1 amplitude level, for a live
+   * waveform/level-meter animation (Blueprint Section 2.4). Optional --
+   * callers that don't need a visual meter can omit it at no extra cost. */
+  onLevel?: (level: number) => void;
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   createAudioContext?: () => AudioContextLike;
 }
@@ -57,6 +61,8 @@ export function useAudioCapture(options: UseAudioCaptureOptions): AudioCaptureSt
   const processorRef = useRef<ScriptProcessorNodeLike | null>(null);
   const onChunkRef = useRef(options.onChunk);
   onChunkRef.current = options.onChunk;
+  const onLevelRef = useRef(options.onLevel);
+  onLevelRef.current = options.onLevel;
 
   const getUserMediaRef = useRef(options.getUserMedia);
   getUserMediaRef.current = options.getUserMedia;
@@ -95,6 +101,7 @@ export function useAudioCapture(options: UseAudioCaptureOptions): AudioCaptureSt
         const input = event.inputBuffer.getChannelData(0);
         const downsampled = downsampleBuffer(input, context.sampleRate, TARGET_SAMPLE_RATE);
         onChunkRef.current(floatTo16BitPCM(downsampled));
+        onLevelRef.current?.(computeRmsLevel(input));
       };
 
       source.connect(processor);

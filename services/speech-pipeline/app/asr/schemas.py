@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.diarization.schemas import SpeakerAssignment
 from app.mt.schemas import TranslationSegment
 from app.tts.schemas import TTSAudioSegment
 
@@ -50,3 +51,9 @@ class TranscriptEvent(BaseModel):
     translation_error: str | None = None
     tts: TTSAudioSegment | None = None
     tts_error: str | None = None
+
+    # Phase 3 addition. Also final-only, also independently degradable --
+    # a diarization failure never blocks the transcript/translation/TTS
+    # already computed (same degrade-not-drop rule as above).
+    speaker: SpeakerAssignment | None = None
+    speaker_error: str | None = None
