@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.clinical_nlp.schemas import MiscommunicationResult
+from app.clinical_nlp.schemas import MedicalEntity, MiscommunicationResult
 from app.diarization.schemas import SpeakerAssignment
 from app.mt.schemas import TranslationSegment
 from app.tts.schemas import TTSAudioSegment
@@ -77,3 +77,14 @@ class TranscriptEvent(BaseModel):
     miscommunication_error: str | None = None
     confidence_v2: float | None = Field(default=None, ge=0.0, le=1.0)
     confidence_band: str | None = Field(default=None, pattern="^(green|yellow|red)$")
+
+    # Phase 5 additions. Also final-only, also independently degradable.
+    # Extracted separately from the original Hindi text and the English
+    # translation (when available) so both sides of the bilingual
+    # transcript panel (Phase 3) can highlight matched terms -- entities
+    # carry their own start_char/end_char grounded in whichever text they
+    # came from, per Blueprint Section 11.1.
+    entities: list[MedicalEntity] | None = None
+    entities_error: str | None = None
+    translation_entities: list[MedicalEntity] | None = None
+    translation_entities_error: str | None = None

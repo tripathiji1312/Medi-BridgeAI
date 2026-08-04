@@ -5,21 +5,24 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 4 — Conversation Memory + Miscommunication Detector — done
-- **Last completed task:** Cross-service Phase 4 vertical slice: speech-pipeline now
-  back-translates (EN→HI) every final utterance and calls clinical-nlp's new
-  miscommunication-check endpoint (real similarity model + deterministic negation
-  lexicon), composing ASR confidence + back-translation similarity into confidence
-  score v2 (color-banded per Blueprint thresholds). orchestrator now holds rolling
-  conversation memory + a structured case-memory store (REST API, clinician-editable),
-  proxied through gateway. apps/web shows a confidence badge, an inline
-  miscommunication alert, and a live "Conversation Memory" panel. Verified with a
-  real (not just fixture-mode) cross-service smoke test in addition to 91
-  unit/integration tests and 2 new E2E specs.
+- **Current phase:** Phase 5 — Clinical NLP: NER, Symptom Extraction, Keyword
+  Highlighting — done
+- **Last completed task:** clinical-nlp now runs deterministic Hindi/English medical
+  lexicon matching (37-term curated lexicon, 6 categories, exact + fuzzy matching via
+  `difflib.SequenceMatcher`, span-grounded, overlap-resolved) behind a new
+  `POST /entities/extract` endpoint. speech-pipeline calls it for both the Hindi
+  original and the English translation of every final utterance, independently
+  degradable like every other enrichment stage. apps/web inline-highlights matched
+  terms in the transcript (tooltip with category/definition/ICD-10/confidence, never
+  a bare label) and shows a categorized "Detected medical terms" panel
+  (Symptoms/Diseases/Medications/Allergies/Vital signs/Procedures). Verified with a
+  real E2E spec against real running services in fixture mode.
 - **Known issues / deferred items:** see "Deferred" under each session entry below.
-- **Next recommended task:** Phase 5 — Clinical NLP: NER, Symptom Extraction,
-  Keyword Highlighting (this is what will finally populate the structured case
-  memory this phase built the store/API for but left empty)
+- **Next recommended task:** Phase 6 per Blueprint Section 8 (Risk Scoring +
+  Emergency Detection) — clinical-nlp already has the categorized entity stream this
+  needs (`is_emergency_keyword` is already on every lexicon term but not yet acted on
+  anywhere), and orchestrator's structured case-memory store (built in Phase 4, still
+  not auto-populated) is a natural next consumer of these extracted entities.
 
 ---
 
@@ -897,6 +900,121 @@ score).
   as one real+real+real chain, worth re-attempting in an environment without this
   path-length constraint (or with Windows long-path support enabled) before treating
   the full real pipeline as proven end-to-end.
+
+---
+
+### Session 6 — 2026-08-04 — Phase 5: Clinical NLP — NER, Symptom Extraction, Keyword Highlighting
+
+**Architecture decision, asked explicitly rather than assumed:** Blueprint Section
+2.2 implies NER as a single capability, but the transcript is bilingual and
+real Hindi-capable clinical NER models are essentially nonexistent (the ones that
+exist are English-only, trained on English clinical corpora like i2b2/MIMIC).
+Surfaced this tradeoff to the user directly via `AskUserQuestion` rather than
+silently picking a side: (a) deterministic lexicon-matching only, Hindi-capable but
+recall-limited to a curated term list, or (b) that plus an English-only ML NER model
+covering just the translated side. User chose (a), consistent with Blueprint Section
+11.1's explicit "deterministic lexicon backstop" principle and this build's standing
+preference for real, verifiable behavior over partial-coverage ML where the ML
+option would only work on half the transcript anyway.
+
+**What was built:**
+- `services/clinical-nlp/app/lexicons/medical_terms.json` + `loader.py`: 37-term
+  curated Hindi/English medical lexicon across 6 categories (symptom, disease,
+  medication, allergy, vital_sign, procedure), each entry carrying `canonical` name,
+  ICD-10 code, Hindi/English surface-form variants, a plain-language `definition`,
+  and an `is_emergency_keyword` flag (not yet consumed — reserved for Phase 6).
+  Loaded once via `@lru_cache`, strict pydantic models.
+- `services/clinical-nlp/app/ner/extractor.py`: the matching engine. Tokenizes
+  input text, slides a window (1-4 words) against every lexicon term's Hindi and
+  English surface forms, scores each candidate with `difflib.SequenceMatcher`
+  (threshold 0.82 — catches misspellings like "buhkar" while staying well above
+  chance-match territory for unrelated words), then resolves overlaps by greedily
+  accepting non-overlapping candidates sorted by (confidence desc, span-length desc)
+  so a longer/more-confident match wins over a shorter one it contains. Every
+  returned `MedicalEntity` carries `start_char`/`end_char` into the source text —
+  grounding via span citation (Blueprint Section 11.1), the same principle
+  `highlightEntities.ts` later re-validates client-side rather than trusting blindly.
+- `services/clinical-nlp/app/routes/entities.py`: `POST /entities/extract`. No
+  provider injection or fixture/static split needed — the matcher is local,
+  deterministic, and has no external model dependency, so it behaves identically
+  under `MEDIBRIDGE_FIXTURE_MODE` and in production.
+- `services/speech-pipeline/`: `EntityExtractor` Protocol + `HttpEntityExtractor`
+  (same Protocol+impl+factory pattern as every other cross-service client here),
+  wired into the existing per-utterance enrichment chain as `_run_entity_extraction`
+  — runs twice per final event (once on the Hindi original, once on the English
+  translation when present), each independently try/excepted into an `*_error`
+  field rather than ever blocking the rest of the chain or the connection.
+- `apps/web`: `highlightEntities()` (pure function, splits text into
+  plain/highlighted segments from entity spans, defensively re-validates that each
+  entity's claimed span actually matches its claimed text before trusting it — a
+  server bug or corrupted payload should never render a highlight that doesn't
+  correspond to real text), `HighlightedText` (renders the segments as `<mark>` with
+  a native-tooltip `title` carrying category/canonical name/ICD-10/definition/
+  confidence — never a bare colored span with no explanation), `MedicalEntitiesPanel`
+  (categorized summary across the whole conversation so far, deduped by canonical
+  name within each category, only rendering categories that actually have a hit).
+  Added `entityCategoryColors` to `packages/design-tokens` (6 category colors,
+  light+dark) rather than overloading the existing status-meaning colors
+  (success/warning/danger) for a taxonomy that isn't about status.
+- Both `LiveTranscriptPanel`'s Hindi and English transcript lines now render through
+  `HighlightedText` instead of plain text, with their own independent
+  `entities_error`/`translation_entities_error` degraded-mode banners.
+
+**Tests (all genuinely run, not just written):**
+- clinical-nlp: 15 new tests (lexicon loader, extractor — exact match, English
+  variant match, fuzzy misspelling match, no-match case, multi-entity extraction,
+  overlap resolution, ordering — and the HTTP route), bringing the service to 30
+  total, all green.
+- speech-pipeline: 5 new tests (entity extraction on both Hindi and English sides,
+  failure on one side doesn't block the other, extraction only runs on finals not
+  partials, provider-factory default/unreachable-endpoint cases), bringing the
+  service to 52 total, all green. mypy --strict and ruff clean.
+- apps/web: 18 new tests — `highlightEntities()` (7: empty case, single/multiple
+  segments, out-of-order sorting, the grounding check rejecting a mismatched span,
+  an out-of-range span, overlap skipping), `HighlightedText` (3: plain fallback,
+  tooltip content including ICD-10 and confidence, fuzzy-match note),
+  `MedicalEntitiesPanel` (4: empty placeholder, category grouping, dedup, only
+  rendering categories with hits), plus 2 new `LiveTranscriptPanel` integration
+  scenarios (entities highlighted + panel populated; degraded-mode banner on
+  extraction failure without losing the transcript text) — bringing the suite to
+  68 total, all green. `tsc -b`, `vite build`, and `eslint` all clean.
+- E2E: 1 new spec (`apps/web/e2e/phase5.spec.ts`) against real running services in
+  `MEDIBRIDGE_FIXTURE_MODE` — asserts the deterministic fixture path (StaticMT's
+  fixed "I have a fever" contains an exact lexicon match on "fever"/R50.9; the
+  romanized-Hindi ASR fixture text has no close-enough lexicon variant, so the
+  Hindi side is expected to come back empty) produces a visible highlight with the
+  correct tooltip and a populated Symptoms section in the panel. Full suite: 12/12
+  E2E specs green.
+- Full regression: 82 Python + 68 JS unit/integration tests, 12/12 E2E specs, all
+  green; mypy --strict/ruff/tsc/eslint all clean across every touched service.
+
+**Deferred, explicitly:**
+- **Recall is bounded by the 37-term curated lexicon.** This is the accepted
+  tradeoff of the user's chosen approach (deterministic-only, no ML NER), not an
+  oversight — flagged here so a future session doesn't treat "detects gaps in
+  coverage" as a bug rather than the expected shape of this design. Expanding the
+  lexicon (more terms, more surface-form variants per term, especially colloquial
+  Hindi phrasing) is the correct lever to pull, not swapping in an ML model that
+  would only work on the English half of a bilingual transcript.
+- **The 0.82 fuzzy-match threshold is a qualitative starting point**, same caveat
+  already on record for diarization's clustering threshold (Phase 3) and the
+  miscommunication similarity threshold (Phase 4) — not tuned against a labeled gold
+  set, flagged for revisit once `scripts/model-eval/`'s offline eval harness exists
+  and real consultation transcripts are available to tune against.
+- **`is_emergency_keyword` is populated on every lexicon entry but not yet acted on
+  anywhere** — reading it and surfacing an emergency alert is explicitly Phase 6
+  scope (Blueprint Section 8: "Risk Scoring + Emergency Detection"), not built here
+  to keep this phase's vertical slice focused on extraction/highlighting only.
+- **Orchestrator's structured case-memory store (built in Phase 4) is still not
+  auto-populated** from extracted entities — Phase 4's session log already flagged
+  this as blocked on NER existing; it now exists, but wiring "extracted entity →
+  case-memory suggestion, clinician confirms" is itself a human-in-the-loop UI flow
+  (Section 1 Principle 4: entities are suggestions, not auto-committed facts) that
+  didn't fit this phase's scope either. Next natural task, noted in the Status
+  Snapshot above.
+- **No new external dependency was added.** `difflib` is Python stdlib; this phase's
+  only new "dependency" is the JSON lexicon file itself, which is data, not code —
+  nothing required flagging under AGENT_INSTRUCTIONS.md Section 6.
 
 ---
 

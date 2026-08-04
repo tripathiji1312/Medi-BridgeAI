@@ -57,6 +57,24 @@ export interface MiscommunicationResult {
 
 export type ConfidenceBand = "green" | "yellow" | "red";
 
+export type EntityCategory = "symptom" | "disease" | "medication" | "allergy" | "vital_sign" | "procedure";
+
+/** Mirrors services/clinical-nlp/app/ner/schemas.py MedicalEntity.
+ * `text`/`start_char`/`end_char` are the exact matched substring and its
+ * position in whichever text it was extracted from -- grounding via span
+ * citation (Blueprint Section 11.1). */
+export interface MedicalEntity {
+  text: string;
+  category: EntityCategory;
+  canonical_name: string;
+  canonical_code: string | null;
+  definition: string;
+  confidence: number;
+  start_char: number;
+  end_char: number;
+  is_fuzzy_match: boolean;
+}
+
 /** Mirrors services/speech-pipeline/app/asr/schemas.py TranscriptEvent --
  * the message shape sent over gateway's /ws/transcribe (proxied verbatim
  * from speech-pipeline, per AGENT_INSTRUCTIONS.md Section 2 gateway
@@ -86,4 +104,12 @@ export interface TranscriptEvent {
   miscommunication_error: string | null;
   confidence_v2: number | null;
   confidence_band: ConfidenceBand | null;
+  // Phase 5 additions. Also final-only, also independently degradable.
+  // entities is extracted from the Hindi original; translation_entities
+  // from the English translation -- both sides of the bilingual
+  // transcript can highlight matched terms independently.
+  entities: MedicalEntity[] | null;
+  entities_error: string | null;
+  translation_entities: MedicalEntity[] | null;
+  translation_entities_error: string | null;
 }

@@ -6,9 +6,12 @@ import { formatMsAsTimestamp } from "../../utils/time";
 import { WaveformMeter } from "../shared/WaveformMeter";
 import { SpeakerChip } from "../shared/SpeakerChip";
 import { ConfidenceBadge } from "../shared/ConfidenceBadge";
+import { HighlightedText } from "../shared/HighlightedText";
 import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
+import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
 import { GATEWAY_WS_URL } from "../../config";
+import type { MedicalEntity } from "@medibridge/shared-types";
 
 /** Phase 1-4 scope. Playback uses <audio controls> (no autoplay) so the
  * clinician/patient decides when to hear it -- consistent with
@@ -24,6 +27,10 @@ export function LiveTranscriptPanel() {
   const latestPartial = [...events].reverse().find((e) => e.type === "partial" && e.segment);
   const latestSessionId = events.length > 0 ? (events[events.length - 1]?.session_id ?? null) : null;
   const sessionId = latestSessionId && latestSessionId !== "n/a" ? latestSessionId : null;
+  const allEntities: MedicalEntity[] = finals.flatMap((e) => [
+    ...(e.entities ?? []),
+    ...(e.translation_entities ?? []),
+  ]);
 
   return (
     <section aria-label="Live transcript" style={{ color: colors.textPrimary }}>
@@ -70,9 +77,25 @@ export function LiveTranscriptPanel() {
               )}
             </div>
 
-            <div>{event.segment?.text}</div>
+            <div>
+              {event.segment && <HighlightedText text={event.segment.text} entities={event.entities} />}
+            </div>
+            {event.entities_error && (
+              <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+                Medical term detection unavailable: {event.entities_error}
+              </div>
+            )}
 
-            {event.translation && <div style={{ color: colors.textSecondary }}>{event.translation.text}</div>}
+            {event.translation && (
+              <div style={{ color: colors.textSecondary }}>
+                <HighlightedText text={event.translation.text} entities={event.translation_entities} />
+              </div>
+            )}
+            {event.translation_entities_error && (
+              <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+                Medical term detection unavailable (translation): {event.translation_entities_error}
+              </div>
+            )}
             {event.translation_error && (
               <div role="alert" style={{ color: colors.warning }}>
                 Translation unavailable: {event.translation_error}
@@ -100,6 +123,8 @@ export function LiveTranscriptPanel() {
         ))}
         {latestPartial && <li style={{ opacity: 0.6 }}>{latestPartial.segment?.text} …</li>}
       </ul>
+
+      <MedicalEntitiesPanel entities={allEntities} />
 
       <ConversationMemoryPanel sessionId={sessionId} refreshTrigger={finals.length} />
     </section>

@@ -16,6 +16,7 @@ from app.routes.transcribe_ws import create_transcribe_router
 from tests.stub_provider import (
     RecordingStubASRProvider,
     RecordingStubEmbeddingProvider,
+    RecordingStubEntityExtractor,
     RecordingStubMiscommunicationChecker,
     RecordingStubMTProvider,
     RecordingStubOrchestratorClient,
@@ -38,6 +39,7 @@ def _build_app(
     get_embedding_provider: Any = None,
     misco_checker: RecordingStubMiscommunicationChecker | None = None,
     orchestrator_client: RecordingStubOrchestratorClient | None = None,
+    entity_extractor: RecordingStubEntityExtractor | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(
@@ -48,6 +50,7 @@ def _build_app(
             get_embedding_provider,
             (lambda: misco_checker) if misco_checker is not None else None,
             (lambda: orchestrator_client) if orchestrator_client is not None else None,
+            (lambda: entity_extractor) if entity_extractor is not None else None,
         )
     )
     return app
@@ -377,3 +380,92 @@ def test_orchestrator_recording_failure_does_not_crash_the_connection_or_drop_th
     assert len(finals) >= 2
     for event in finals:
         assert event["segment"]["text"] == "fixture transcript"
+
+
+def test_final_events_carry_entities_extracted_from_both_hindi_and_english_text() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    mt_provider = RecordingStubMTProvider(translated_text="fixture translation")
+    entity_extractor = RecordingStubEntityExtractor()
+    app = _build_app(asr_provider, mt_provider, entity_extractor=entity_extractor)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["entities"][0]["canonical_name"] == "stub symptom"
+        assert event["entities_error"] is None
+        assert event["translation_entities"][0]["canonical_name"] == "stub symptom"
+        assert event["translation_entities_error"] is None
+    # Extraction runs once for the Hindi text, once for the English
+    # translation, per final event.
+    assert entity_extractor.calls == [
+        ("fixture transcript", "hi"),
+        ("fixture translation", "en"),
+    ] * 2
+
+
+def test_entity_extraction_failure_on_hindi_side_does_not_block_translation_side() -> None:
+    class HindiFailsEntityExtractor:
+        """Fails for Hindi text, succeeds for English."""
+
+        async def extract(self, text: str, language: str) -> list[object]:
+            if language == "hi":
+                raise RuntimeError("clinical-nlp unavailable")
+            from app.clinical_nlp.schemas import MedicalEntity
+
+            return [
+                MedicalEntity(
+                    text="fever",
+                    category="symptom",
+                    canonical_name="fever",
+                    canonical_code="R50.9",
+                    definition="elevated body temperature",
+                    confidence=1.0,
+                    start_char=0,
+                    end_char=5,
+                    is_fuzzy_match=False,
+                )
+            ]
+
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    mt_provider = RecordingStubMTProvider(translated_text="fixture translation")
+    app = _build_app(
+        asr_provider, mt_provider, entity_extractor=HindiFailsEntityExtractor()  # type: ignore[arg-type]
+    )
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"  # earlier stages still present
+        assert event["entities"] is None
+        assert "unavailable" in event["entities_error"]
+        assert event["translation_entities"][0]["canonical_name"] == "fever"
+        assert event["translation_entities_error"] is None
+
+
+def test_entity_extraction_only_runs_on_finals_not_partials() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    entity_extractor = RecordingStubEntityExtractor()
+    app = _build_app(asr_provider, entity_extractor=entity_extractor)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            _finals_from(ws)
+
+    # No MT provider here, so only the Hindi-side extraction runs (no
+    # translation to extract from) -- one call per final, none per partial.
+    assert entity_extractor.calls == [("fixture transcript", "hi")] * 2

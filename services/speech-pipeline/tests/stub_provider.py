@@ -11,7 +11,7 @@ import base64
 from dataclasses import dataclass, field
 
 from app.asr.schemas import TranscriptSegment
-from app.clinical_nlp.schemas import MiscommunicationResult
+from app.clinical_nlp.schemas import MedicalEntity, MiscommunicationResult
 from app.mt.schemas import TranslationSegment
 from app.tts.schemas import TTSAudioSegment
 
@@ -117,3 +117,30 @@ class RecordingStubOrchestratorClient:
         if self.should_fail:
             raise RuntimeError("orchestrator unavailable")
         self.calls.append((session_id, speaker, original_text, translated_text))
+
+
+@dataclass
+class RecordingStubEntityExtractor:
+    entities: list[MedicalEntity] = field(
+        default_factory=lambda: [
+            MedicalEntity(
+                text="stub entity",
+                category="symptom",
+                canonical_name="stub symptom",
+                canonical_code="R00.0",
+                definition="a stub entity for tests",
+                confidence=1.0,
+                start_char=0,
+                end_char=11,
+                is_fuzzy_match=False,
+            )
+        ]
+    )
+    calls: list[tuple[str, str]] = field(default_factory=list)
+    should_fail: bool = False
+
+    async def extract(self, text: str, language: str) -> list[MedicalEntity]:
+        self.calls.append((text, language))
+        if self.should_fail:
+            raise RuntimeError("clinical-nlp unavailable")
+        return self.entities

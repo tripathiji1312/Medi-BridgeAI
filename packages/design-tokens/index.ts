@@ -66,6 +66,28 @@ export const colorTokens: Record<ThemeMode, ColorTokens> = {
   },
 };
 
+// Medical entity category colors (Blueprint Section 2.2: inline highlighting
+// + categorized panel). Keys mirror shared-types' EntityCategory literals;
+// not imported here to keep this package framework/contract-agnostic.
+export const entityCategoryColors: Record<ThemeMode, Record<string, string>> = {
+  light: {
+    symptom: "#B58500",
+    disease: "#C62828",
+    medication: "#1565C0",
+    allergy: "#8E24AA",
+    vital_sign: "#1E8E3E",
+    procedure: "#00838F",
+  },
+  dark: {
+    symptom: "#E0B23A",
+    disease: "#E5645A",
+    medication: "#5B9BEA",
+    allergy: "#CE93D8",
+    vital_sign: "#4CBB6F",
+    procedure: "#4DD0E1",
+  },
+};
+
 export const spacingTokens = {
   xs: "4px",
   sm: "8px",

@@ -397,4 +397,125 @@ describe("LiveTranscriptPanel", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("highlights medical entities inline and lists them in the categorized panel", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          segment: {
+            text: "mujhe bukhaar hai",
+            is_final: true,
+            confidence: 0.91,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+          translation: { text: "I have a fever", source_language: "hi", target_language: "en" },
+          translation_error: null,
+          entities: null,
+          entities_error: null,
+          translation_entities: [
+            {
+              text: "fever",
+              category: "symptom",
+              canonical_name: "fever",
+              canonical_code: "R50.9",
+              definition: "An elevated body temperature, often a sign of infection or illness.",
+              confidence: 1.0,
+              start_char: 9,
+              end_char: 14,
+              is_fuzzy_match: false,
+            },
+          ],
+          translation_entities_error: null,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      const mark = screen.getByText("fever");
+      expect(mark.tagName).toBe("MARK");
+    });
+    expect(screen.getByText("Symptoms")).toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a degraded-mode warning when entity extraction fails, without dropping the transcript text", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          segment: {
+            text: "mujhe bukhaar hai",
+            is_final: true,
+            confidence: 0.91,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+          entities: null,
+          entities_error: "clinical-nlp unavailable",
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("mujhe bukhaar hai")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Medical term detection unavailable: clinical-nlp unavailable/)).toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
 });

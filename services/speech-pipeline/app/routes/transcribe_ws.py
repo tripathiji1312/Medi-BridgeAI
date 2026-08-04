@@ -20,7 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.asr.provider import ASRProvider
 from app.asr.schemas import TranscriptEvent
 from app.asr.session import StreamingASRSession
-from app.clinical_nlp.provider import MiscommunicationChecker
+from app.clinical_nlp.provider import EntityExtractor, MiscommunicationChecker
 from app.confidence.scoring import compute_confidence_v2, confidence_band
 from app.diarization.diarizer import SpeakerDiarizer
 from app.diarization.provider import SpeakerEmbeddingProvider
@@ -35,6 +35,7 @@ TTSProviderGetter = Callable[[], TTSProvider]
 EmbeddingProviderGetter = Callable[[], SpeakerEmbeddingProvider]
 MiscommunicationCheckerGetter = Callable[[], MiscommunicationChecker]
 OrchestratorClientGetter = Callable[[], OrchestratorClient]
+EntityExtractorGetter = Callable[[], EntityExtractor]
 
 
 def create_transcribe_router(
@@ -44,6 +45,7 @@ def create_transcribe_router(
     get_embedding_provider: EmbeddingProviderGetter | None = None,
     get_miscommunication_checker: MiscommunicationCheckerGetter | None = None,
     get_orchestrator_client: OrchestratorClientGetter | None = None,
+    get_entity_extractor: EntityExtractorGetter | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -96,6 +98,7 @@ def create_transcribe_router(
                         get_mt_provider,
                         get_tts_provider,
                         get_miscommunication_checker,
+                        get_entity_extractor,
                         session,
                         diarizer,
                         diarizer_error,
@@ -122,14 +125,15 @@ async def _enrich_final_event(
     get_mt_provider: MTProviderGetter | None,
     get_tts_provider: TTSProviderGetter | None,
     get_miscommunication_checker: MiscommunicationCheckerGetter | None,
+    get_entity_extractor: EntityExtractorGetter | None,
     session: StreamingASRSession,
     diarizer: SpeakerDiarizer | None,
     diarizer_error: str | None,
 ) -> TranscriptEvent:
     """Runs MT, back-translation + miscommunication check + confidence v2,
-    TTS, then diarization on a finalized ASR event. Partials are left alone
-    -- translating/diarizing unstable text wastes compute and would flicker
-    on screen.
+    TTS, diarization, then entity extraction on a finalized ASR event.
+    Partials are left alone -- translating/diarizing/extracting unstable
+    text wastes compute and would flicker on screen.
 
     Each stage's failure is independent and never drops what earlier stages
     already computed: the client always has at least the raw Hindi text +
@@ -143,6 +147,7 @@ async def _enrich_final_event(
     event = await _run_miscommunication_check(event, get_miscommunication_checker)
     event = _run_tts(event, get_tts_provider)
     event = _run_diarization(event, session, diarizer, diarizer_error)
+    event = await _run_entity_extraction(event, get_entity_extractor)
     return event
 
 
@@ -217,6 +222,41 @@ def _run_tts(event: TranscriptEvent, get_tts_provider: TTSProviderGetter | None)
     except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
         logger.exception("tts failed for utterance %s", event.utterance_id)
         return event.model_copy(update={"tts_error": str(exc)})
+
+
+async def _run_entity_extraction(
+    event: TranscriptEvent, get_entity_extractor: EntityExtractorGetter | None
+) -> TranscriptEvent:
+    """Extracts medical entities from both sides of the bilingual
+    transcript (Blueprint Section 2.2/2.4: inline keyword highlighting +
+    entity categorization for both the Hindi original and the English
+    translation). The two extractions are independent -- a failure on one
+    side never blocks the other, same degrade-not-drop rule as every other
+    stage in this chain.
+    """
+    if get_entity_extractor is None:
+        return event
+    segment = event.segment
+    assert segment is not None
+
+    try:
+        entities = await get_entity_extractor().extract(segment.text, segment.language)
+        event = event.model_copy(update={"entities": entities})
+    except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
+        logger.exception("entity extraction failed for utterance %s", event.utterance_id)
+        event = event.model_copy(update={"entities_error": str(exc)})
+
+    if event.translation is not None:
+        try:
+            translation_entities = await get_entity_extractor().extract(
+                event.translation.text, event.translation.target_language
+            )
+            event = event.model_copy(update={"translation_entities": translation_entities})
+        except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
+            logger.exception("translation entity extraction failed for utterance %s", event.utterance_id)
+            event = event.model_copy(update={"translation_entities_error": str(exc)})
+
+    return event
 
 
 async def _record_utterance(

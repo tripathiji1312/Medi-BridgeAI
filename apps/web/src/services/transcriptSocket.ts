@@ -46,6 +46,10 @@ export class TranscriptSocket {
           miscommunication_error: null,
           confidence_v2: null,
           confidence_band: null,
+          entities: null,
+          entities_error: null,
+          translation_entities: null,
+          translation_entities_error: null,
         });
       }
     };

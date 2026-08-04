@@ -1,0 +1,347 @@
+{
+  "version": "1.0.0",
+  "terms": [
+    {
+      "canonical": "fever",
+      "category": "symptom",
+      "icd10": "R50.9",
+      "hindi": ["बुखार", "ज्वर", "बुखार है"],
+      "english": ["fever", "high temperature", "pyrexia"],
+      "definition": "An elevated body temperature, often a sign of infection or illness.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "headache",
+      "category": "symptom",
+      "icd10": "R51",
+      "hindi": ["सिरदर्द", "सर दर्द"],
+      "english": ["headache"],
+      "definition": "Pain in the head or upper neck.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "cough",
+      "category": "symptom",
+      "icd10": "R05",
+      "hindi": ["खांसी", "खाँसी"],
+      "english": ["cough"],
+      "definition": "A sudden, often repetitive reflex to clear the airway.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "vomiting",
+      "category": "symptom",
+      "icd10": "R11.10",
+      "hindi": ["उल्टी", "वमन"],
+      "english": ["vomiting", "throwing up"],
+      "definition": "Forceful expulsion of stomach contents through the mouth.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "diarrhea",
+      "category": "symptom",
+      "icd10": "R19.7",
+      "hindi": ["दस्त", "पतले दस्त"],
+      "english": ["diarrhea", "loose motions"],
+      "definition": "Frequent, loose, or watery bowel movements.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "chest pain",
+      "category": "symptom",
+      "icd10": "R07.9",
+      "hindi": ["सीने में दर्द", "छाती में दर्द"],
+      "english": ["chest pain"],
+      "definition": "Pain or discomfort in the chest -- can be a sign of a serious cardiac or pulmonary condition.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "abdominal pain",
+      "category": "symptom",
+      "icd10": "R10.9",
+      "hindi": ["पेट दर्द", "पेट में दर्द"],
+      "english": ["abdominal pain", "stomach pain", "stomach ache"],
+      "definition": "Pain felt anywhere between the chest and pelvic region.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "dizziness",
+      "category": "symptom",
+      "icd10": "R42",
+      "hindi": ["चक्कर आना", "चक्कर"],
+      "english": ["dizziness", "vertigo"],
+      "definition": "A sensation of spinning or lightheadedness.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "fatigue",
+      "category": "symptom",
+      "icd10": "R53.83",
+      "hindi": ["थकान", "कमजोरी"],
+      "english": ["fatigue", "tiredness", "weakness"],
+      "definition": "A feeling of persistent tiredness or lack of energy.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "shortness of breath",
+      "category": "symptom",
+      "icd10": "R06.02",
+      "hindi": ["सांस लेने में तकलीफ", "सांस फूलना"],
+      "english": ["shortness of breath", "breathlessness", "difficulty breathing"],
+      "definition": "Difficulty breathing or a feeling of not getting enough air -- can indicate a serious cardiac or respiratory condition.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "nausea",
+      "category": "symptom",
+      "icd10": "R11.0",
+      "hindi": ["जी मिचलाना", "मतली"],
+      "english": ["nausea"],
+      "definition": "An uneasy sensation in the stomach with an urge to vomit.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "sore throat",
+      "category": "symptom",
+      "icd10": "J02.9",
+      "hindi": ["गले में खराश", "गला खराब"],
+      "english": ["sore throat"],
+      "definition": "Pain, scratchiness, or irritation of the throat.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "body ache",
+      "category": "symptom",
+      "icd10": "M79.10",
+      "hindi": ["बदन दर्द", "शरीर में दर्द"],
+      "english": ["body ache", "body pain"],
+      "definition": "Generalized pain or aching throughout the body.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "rash",
+      "category": "symptom",
+      "icd10": "R21",
+      "hindi": ["चकत्ते", "त्वचा पर दाने"],
+      "english": ["rash", "skin eruption"],
+      "definition": "A visible change in the skin's color or texture.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "swelling",
+      "category": "symptom",
+      "icd10": "R60.9",
+      "hindi": ["सूजन"],
+      "english": ["swelling", "edema"],
+      "definition": "Abnormal enlargement of a body part due to fluid accumulation.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "unconsciousness",
+      "category": "symptom",
+      "icd10": "R40.20",
+      "hindi": ["बेहोशी", "बेहोश"],
+      "english": ["unconsciousness", "unconscious", "passed out"],
+      "definition": "A state of being unresponsive to stimuli -- a medical emergency.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "diabetes",
+      "category": "disease",
+      "icd10": "E11.9",
+      "hindi": ["मधुमेह", "शुगर की बीमारी", "शुगर"],
+      "english": ["diabetes"],
+      "definition": "A chronic condition affecting how the body processes blood sugar.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "hypertension",
+      "category": "disease",
+      "icd10": "I10",
+      "hindi": ["उच्च रक्तचाप", "हाई ब्लड प्रेशर"],
+      "english": ["hypertension", "high blood pressure"],
+      "definition": "Persistently elevated blood pressure in the arteries.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "asthma",
+      "category": "disease",
+      "icd10": "J45.909",
+      "hindi": ["दमा", "अस्थमा"],
+      "english": ["asthma"],
+      "definition": "A chronic condition causing airway inflammation and breathing difficulty.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "tuberculosis",
+      "category": "disease",
+      "icd10": "A15.9",
+      "hindi": ["तपेदिक", "टीबी", "क्षय रोग"],
+      "english": ["tuberculosis", "TB"],
+      "definition": "A bacterial infection primarily affecting the lungs.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "jaundice",
+      "category": "disease",
+      "icd10": "R17",
+      "hindi": ["पीलिया"],
+      "english": ["jaundice"],
+      "definition": "Yellowing of the skin and eyes due to elevated bilirubin, often signaling liver dysfunction.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "malaria",
+      "category": "disease",
+      "icd10": "B54",
+      "hindi": ["मलेरिया"],
+      "english": ["malaria"],
+      "definition": "A mosquito-borne parasitic disease causing fever and chills.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "typhoid",
+      "category": "disease",
+      "icd10": "A01.00",
+      "hindi": ["टाइफाइड", "मियादी बुखार"],
+      "english": ["typhoid"],
+      "definition": "A bacterial infection causing prolonged fever, spread through contaminated food or water.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "pneumonia",
+      "category": "disease",
+      "icd10": "J18.9",
+      "hindi": ["निमोनिया"],
+      "english": ["pneumonia"],
+      "definition": "Infection causing inflammation of the air sacs in one or both lungs.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "paracetamol",
+      "category": "medication",
+      "icd10": null,
+      "hindi": ["पैरासिटामोल", "पैरासीटामोल"],
+      "english": ["paracetamol", "acetaminophen"],
+      "definition": "A common medication used to treat pain and fever.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "insulin",
+      "category": "medication",
+      "icd10": null,
+      "hindi": ["इंसुलिन"],
+      "english": ["insulin"],
+      "definition": "A hormone medication used to manage blood sugar in diabetes.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "aspirin",
+      "category": "medication",
+      "icd10": null,
+      "hindi": ["एस्पिरिन"],
+      "english": ["aspirin"],
+      "definition": "A medication used to reduce pain, fever, and inflammation, and to prevent blood clots.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "antibiotic",
+      "category": "medication",
+      "icd10": null,
+      "hindi": ["एंटीबायोटिक", "एंटीबायोटिक्स"],
+      "english": ["antibiotic", "antibiotics"],
+      "definition": "A medication used to treat bacterial infections.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "penicillin allergy",
+      "category": "allergy",
+      "icd10": "Z88.0",
+      "hindi": ["पेनिसिलिन से एलर्जी"],
+      "english": ["penicillin allergy"],
+      "definition": "An immune reaction to penicillin-class antibiotics.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "dust allergy",
+      "category": "allergy",
+      "icd10": "J30.89",
+      "hindi": ["धूल से एलर्जी"],
+      "english": ["dust allergy"],
+      "definition": "An immune reaction to household or environmental dust.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "food allergy",
+      "category": "allergy",
+      "icd10": "T78.1",
+      "hindi": ["खाने से एलर्जी", "भोजन से एलर्जी"],
+      "english": ["food allergy"],
+      "definition": "An immune reaction to a specific food.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "blood pressure",
+      "category": "vital_sign",
+      "icd10": null,
+      "hindi": ["रक्तचाप", "ब्लड प्रेशर"],
+      "english": ["blood pressure"],
+      "definition": "The force of blood pushing against artery walls, measured in mmHg.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "pulse",
+      "category": "vital_sign",
+      "icd10": null,
+      "hindi": ["नब्ज़", "नाड़ी"],
+      "english": ["pulse", "heart rate"],
+      "definition": "The rate at which the heart beats, felt as a rhythmic throbbing in the arteries.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "temperature",
+      "category": "vital_sign",
+      "icd10": null,
+      "hindi": ["तापमान"],
+      "english": ["temperature"],
+      "definition": "A measurement of body heat, used to detect fever.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "blood test",
+      "category": "procedure",
+      "icd10": null,
+      "hindi": ["रक्त परीक्षण", "खून की जांच"],
+      "english": ["blood test"],
+      "definition": "A laboratory analysis of a blood sample to check for various health markers.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "x-ray",
+      "category": "procedure",
+      "icd10": null,
+      "hindi": ["एक्स-रे", "एक्सरे"],
+      "english": ["x-ray", "xray"],
+      "definition": "An imaging technique used to view the inside of the body, especially bones.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "surgery",
+      "category": "procedure",
+      "icd10": null,
+      "hindi": ["सर्जरी", "ऑपरेशन"],
+      "english": ["surgery", "operation"],
+      "definition": "A medical procedure involving incision into the body to treat a condition.",
+      "is_emergency_keyword": false
+    },
+    {
+      "canonical": "injection",
+      "category": "procedure",
+      "icd10": null,
+      "hindi": ["इंजेक्शन", "सुई"],
+      "english": ["injection", "shot"],
+      "definition": "Administration of a substance into the body using a needle and syringe.",
+      "is_emergency_keyword": false
+    }
+  ]
+}

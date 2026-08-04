@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -15,3 +17,22 @@ class MiscommunicationResult(BaseModel):
     similarity_score: float = Field(ge=0.0, le=1.0)
     negation_flip_detected: bool
     reason: str
+
+
+EntityCategory = Literal["symptom", "disease", "medication", "allergy", "vital_sign", "procedure"]
+
+
+class MedicalEntity(BaseModel):
+    """Mirrors services/clinical-nlp/app/ner/schemas.py MedicalEntity."""
+
+    model_config = {"strict": True}
+
+    text: str
+    category: EntityCategory
+    canonical_name: str
+    canonical_code: str | None
+    definition: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    start_char: int = Field(ge=0)
+    end_char: int = Field(ge=0)
+    is_fuzzy_match: bool
