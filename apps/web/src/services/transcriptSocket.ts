@@ -30,6 +30,7 @@ export class TranscriptSocket {
         this.options.onEvent({
           type: "error",
           utterance_id: "n/a",
+          session_id: "n/a",
           segment: null,
           error: "Received a malformed transcript event from the server",
           latency_ms: null,
@@ -39,6 +40,12 @@ export class TranscriptSocket {
           tts_error: null,
           speaker: null,
           speaker_error: null,
+          back_translation: null,
+          back_translation_error: null,
+          miscommunication: null,
+          miscommunication_error: null,
+          confidence_v2: null,
+          confidence_band: null,
         });
       }
     };

@@ -325,4 +325,76 @@ describe("LiveTranscriptPanel", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("shows the confidence badge and a miscommunication alert with its reason", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+    // ConversationMemoryPanel fetches once a session_id is present.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ session_id: "s1", utterances: [], case_memory: [] }),
+      }),
+    );
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          session_id: "s1",
+          segment: {
+            text: "mujhe bukhaar hai",
+            is_final: true,
+            confidence: 0.8,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+          miscommunication: {
+            consistent: false,
+            similarity_score: 0.3,
+            negation_flip_detected: true,
+            reason: "Negation mismatch between the original and its back-translation.",
+          },
+          confidence_v2: 0.55,
+          confidence_band: "red",
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Confidence: 55%")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/negation mismatch/i)).toBeInTheDocument();
+    // Conversation memory panel picked up the session id from the event.
+    await waitFor(() => {
+      expect(screen.getByText(/Tracking 0 utterances/i)).toBeInTheDocument();
+    });
+
+    vi.unstubAllGlobals();
+  });
 });

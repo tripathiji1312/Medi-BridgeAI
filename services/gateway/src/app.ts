@@ -2,12 +2,14 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import websocketPlugin from "@fastify/websocket";
 import { healthRoutes } from "./routes/health";
+import { registerMemoryProxy } from "./routes/memory";
 import { requireAuth } from "./middleware/requireAuth";
 import { registerTranscribeProxy } from "./ws/transcribeProxy";
 
 export interface BuildAppOptions {
   jwtSecret: string;
   speechPipelineWsUrl: string;
+  orchestratorUrl: string;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -17,6 +19,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(websocketPlugin);
   await app.register(healthRoutes);
   await registerTranscribeProxy(app, { upstreamUrl: options.speechPipelineWsUrl });
+  await registerMemoryProxy(app, { orchestratorUrl: options.orchestratorUrl });
 
   // Example of a route boundary that will require auth once real session
   // routes exist (Phase 3+). Registered now so the auth stub has coverage.

@@ -11,6 +11,7 @@ import base64
 from dataclasses import dataclass, field
 
 from app.asr.schemas import TranscriptSegment
+from app.clinical_nlp.schemas import MiscommunicationResult
 from app.mt.schemas import TranslationSegment
 from app.tts.schemas import TTSAudioSegment
 
@@ -82,3 +83,37 @@ class RecordingStubEmbeddingProvider:
     def embed(self, pcm16_mono: bytes, sample_rate: int) -> list[float]:
         self.calls.append(pcm16_mono)
         return self.embedding
+
+
+@dataclass
+class RecordingStubMiscommunicationChecker:
+    consistent: bool = True
+    similarity_score: float = 0.9
+    negation_flip_detected: bool = False
+    reason: str = "stub reason"
+    calls: list[tuple[str, str]] = field(default_factory=list)
+    should_fail: bool = False
+
+    async def check(self, original_text: str, back_translated_text: str, language: str) -> MiscommunicationResult:
+        self.calls.append((original_text, back_translated_text))
+        if self.should_fail:
+            raise RuntimeError("clinical-nlp unavailable")
+        return MiscommunicationResult(
+            consistent=self.consistent,
+            similarity_score=self.similarity_score,
+            negation_flip_detected=self.negation_flip_detected,
+            reason=self.reason,
+        )
+
+
+@dataclass
+class RecordingStubOrchestratorClient:
+    calls: list[tuple[str, str | None, str, str | None]] = field(default_factory=list)
+    should_fail: bool = False
+
+    async def post_utterance(
+        self, session_id: str, speaker: str | None, original_text: str, translated_text: str | None
+    ) -> None:
+        if self.should_fail:
+            raise RuntimeError("orchestrator unavailable")
+        self.calls.append((session_id, speaker, original_text, translated_text))

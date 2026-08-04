@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 
 from app.health import HealthResponse
+from app.memory.store import MemoryStore
+from app.routes.memory import create_memory_router
 
 SERVICE_NAME = "orchestrator"
 SERVICE_VERSION = "0.1.0"
 
 app = FastAPI(title=SERVICE_NAME)
+
+_store = MemoryStore()
+app.include_router(create_memory_router(lambda: _store))
 
 
 @app.get("/health", response_model=HealthResponse)

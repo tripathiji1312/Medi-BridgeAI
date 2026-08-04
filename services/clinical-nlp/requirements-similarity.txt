@@ -1,0 +1,7 @@
+-r requirements.txt
+# Real similarity model deps -- heavy (torch + model weights downloaded on
+# first use). Kept separate from requirements.txt for the same reason as
+# speech-pipeline's requirements-*.txt: ordinary dev/test installs use the
+# fixture providers and stay lightweight.
+sentence-transformers>=5.6.1,<6.0.0
+torch>=2.13.0,<3.0.0

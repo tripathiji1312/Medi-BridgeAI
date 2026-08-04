@@ -5,9 +5,12 @@ import { pcm16ToWavDataUrl } from "../../audio/wav";
 import { formatMsAsTimestamp } from "../../utils/time";
 import { WaveformMeter } from "../shared/WaveformMeter";
 import { SpeakerChip } from "../shared/SpeakerChip";
+import { ConfidenceBadge } from "../shared/ConfidenceBadge";
+import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
+import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { GATEWAY_WS_URL } from "../../config";
 
-/** Phase 1-3 scope. Playback uses <audio controls> (no autoplay) so the
+/** Phase 1-4 scope. Playback uses <audio controls> (no autoplay) so the
  * clinician/patient decides when to hear it -- consistent with
  * "human-in-the-loop always" (Blueprint Section 1). */
 export function LiveTranscriptPanel() {
@@ -19,6 +22,8 @@ export function LiveTranscriptPanel() {
 
   const finals = events.filter((e) => e.type === "final" && e.segment);
   const latestPartial = [...events].reverse().find((e) => e.type === "partial" && e.segment);
+  const latestSessionId = events.length > 0 ? (events[events.length - 1]?.session_id ?? null) : null;
+  const sessionId = latestSessionId && latestSessionId !== "n/a" ? latestSessionId : null;
 
   return (
     <section aria-label="Live transcript" style={{ color: colors.textPrimary }}>
@@ -42,7 +47,7 @@ export function LiveTranscriptPanel() {
       <ul aria-live="polite" aria-label="Transcript">
         {finals.map((event) => (
           <li key={event.utterance_id} style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ color: colors.textSecondary, fontSize: 12 }}>
                 {event.segment && formatMsAsTimestamp(event.segment.start_ms)}–
                 {event.segment && formatMsAsTimestamp(event.segment.end_ms)}
@@ -60,6 +65,9 @@ export function LiveTranscriptPanel() {
                   Speaker unknown: {event.speaker_error}
                 </span>
               )}
+              {event.confidence_v2 !== null && event.confidence_band !== null && (
+                <ConfidenceBadge score={event.confidence_v2} band={event.confidence_band} />
+              )}
             </div>
 
             <div>{event.segment?.text}</div>
@@ -68,6 +76,15 @@ export function LiveTranscriptPanel() {
             {event.translation_error && (
               <div role="alert" style={{ color: colors.warning }}>
                 Translation unavailable: {event.translation_error}
+              </div>
+            )}
+
+            {event.miscommunication && !event.miscommunication.consistent && (
+              <MiscommunicationAlert result={event.miscommunication} />
+            )}
+            {event.miscommunication_error && (
+              <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+                Miscommunication check unavailable: {event.miscommunication_error}
               </div>
             )}
 
@@ -83,6 +100,8 @@ export function LiveTranscriptPanel() {
         ))}
         {latestPartial && <li style={{ opacity: 0.6 }}>{latestPartial.segment?.text} …</li>}
       </ul>
+
+      <ConversationMemoryPanel sessionId={sessionId} refreshTrigger={finals.length} />
     </section>
   );
 }

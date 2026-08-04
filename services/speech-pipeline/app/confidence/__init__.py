@@ -1,2 +1,3 @@
-﻿"""Phase 2/4: translation confidence scoring. Placeholder package -- no logic yet (Phase 0 scope is health checks only)."""
+﻿"""Translation confidence scoring v2: composite of ASR confidence and
+back-translation agreement (Blueprint Section 2.2)."""
 

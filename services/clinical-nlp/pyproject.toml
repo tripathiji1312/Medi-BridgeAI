@@ -2,6 +2,12 @@
 strict = true
 python_version = "3.11"
 
+# sentence-transformers/torch live in requirements-similarity.txt (optional,
+# heavy -- same rationale as speech-pipeline's requirements-*.txt).
+[[tool.mypy.overrides]]
+module = ["sentence_transformers", "sentence_transformers.*", "torch", "torch.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 

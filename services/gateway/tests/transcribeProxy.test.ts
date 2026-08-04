@@ -32,6 +32,7 @@ describe("gateway /ws/transcribe proxy", () => {
     app = await buildApp({
       jwtSecret: "test-secret",
       speechPipelineWsUrl: `ws://127.0.0.1:${upstreamPort}`,
+      orchestratorUrl: "http://localhost:0",
     });
     const gatewayAddress = await app.listen({ port: 0, host: "127.0.0.1" });
 
@@ -56,6 +57,7 @@ describe("gateway /ws/transcribe proxy", () => {
     app = await buildApp({
       jwtSecret: "test-secret",
       speechPipelineWsUrl: `ws://127.0.0.1:${upstreamPort}`,
+      orchestratorUrl: "http://localhost:0",
     });
     const gatewayAddress = await app.listen({ port: 0, host: "127.0.0.1" });
 
@@ -78,6 +80,7 @@ describe("gateway /ws/transcribe proxy", () => {
       jwtSecret: "test-secret",
       // Nothing listens here -- simulates speech-pipeline being down.
       speechPipelineWsUrl: "ws://127.0.0.1:1/ws/transcribe",
+      orchestratorUrl: "http://localhost:0",
     });
     const gatewayAddress = await app.listen({ port: 0, host: "127.0.0.1" });
 

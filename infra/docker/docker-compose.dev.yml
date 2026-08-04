@@ -55,14 +55,16 @@ services:
       GATEWAY_PORT: 4000
       JWT_SECRET: dev-only-change-me
       # "localhost" here would resolve to the gateway container itself, not
-      # speech-pipeline -- must be the Compose service name.
+      # the other services -- must be the Compose service name.
       SPEECH_PIPELINE_WS_URL: ws://speech-pipeline:8001/ws/transcribe
+      ORCHESTRATOR_URL: http://orchestrator:8004
     ports:
       - "4000:4000"
     depends_on:
       - postgres
       - redis
       - speech-pipeline
+      - orchestrator
 
   speech-pipeline:
     build:
@@ -75,8 +77,14 @@ services:
         # see Dockerfile.python-service's comment on REQUIREMENTS_FILE for
         # why this override matters.
         REQUIREMENTS_FILE: requirements-full.txt
+    environment:
+      CLINICAL_NLP_URL: http://clinical-nlp:8002
+      ORCHESTRATOR_URL: http://orchestrator:8004
     ports:
       - "8001:8001"
+    depends_on:
+      - clinical-nlp
+      - orchestrator
 
   clinical-nlp:
     build:
@@ -85,6 +93,9 @@ services:
       args:
         SERVICE_DIR: services/clinical-nlp
         SERVICE_PORT: 8002
+        # Real similarity model for the miscommunication detector -- see
+        # Dockerfile.python-service's comment on REQUIREMENTS_FILE.
+        REQUIREMENTS_FILE: requirements-similarity.txt
     ports:
       - "8002:8002"
     depends_on:

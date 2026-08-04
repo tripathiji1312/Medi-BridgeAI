@@ -8,6 +8,7 @@ import wave
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -15,7 +16,9 @@ from app.routes.transcribe_ws import create_transcribe_router
 from tests.stub_provider import (
     RecordingStubASRProvider,
     RecordingStubEmbeddingProvider,
+    RecordingStubMiscommunicationChecker,
     RecordingStubMTProvider,
+    RecordingStubOrchestratorClient,
     RecordingStubTTSProvider,
 )
 
@@ -33,6 +36,8 @@ def _build_app(
     mt_provider: RecordingStubMTProvider | None = None,
     tts_provider: RecordingStubTTSProvider | None = None,
     get_embedding_provider: Any = None,
+    misco_checker: RecordingStubMiscommunicationChecker | None = None,
+    orchestrator_client: RecordingStubOrchestratorClient | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(
@@ -41,6 +46,8 @@ def _build_app(
             (lambda: mt_provider) if mt_provider is not None else None,
             (lambda: tts_provider) if tts_provider is not None else None,
             get_embedding_provider,
+            (lambda: misco_checker) if misco_checker is not None else None,
+            (lambda: orchestrator_client) if orchestrator_client is not None else None,
         )
     )
     return app
@@ -76,6 +83,12 @@ def test_websocket_streams_final_transcript_events_for_the_fixture() -> None:
         assert event["segment"]["is_final"] is True
         assert event["latency_ms"] is not None
         assert 0.0 <= event["segment"]["confidence"] <= 1.0
+    # Every event carries the same session_id (Blueprint Section 2.2: the
+    # client needs this to query orchestrator's conversation memory), and
+    # it's a real generated id, not the "n/a" placeholder.
+    session_ids = {event["session_id"] for event in events}
+    assert len(session_ids) == 1
+    assert next(iter(session_ids)) != "n/a"
 
 
 def test_websocket_reports_error_and_closes_when_provider_is_unavailable() -> None:
@@ -121,12 +134,20 @@ def test_final_events_carry_translation_and_tts_audio_when_both_providers_succee
         assert event["translation"]["text"] == "fixture translation"
         assert event["translation"]["target_language"] == "en"
         assert event["translation_error"] is None
+        assert event["back_translation"]["text"] == "fixture translation"  # stub echoes translated_text
+        assert event["back_translation_error"] is None
         assert event["tts"]["sample_rate"] == 16_000
         assert event["tts"]["format"] == "pcm16"
         assert event["tts_error"] is None
-    # MT only runs on finals, never partials -- translating unstable text
-    # would waste compute and flicker on screen.
-    assert mt_provider.calls == ["fixture transcript", "fixture transcript"]
+    # MT runs twice per final (forward HI->EN, then back EN->HI), never on
+    # partials -- translating unstable text would waste compute and flicker
+    # on screen.
+    assert mt_provider.calls == [
+        "fixture transcript",
+        "fixture translation",
+        "fixture transcript",
+        "fixture translation",
+    ]
 
 
 def test_translation_failure_still_delivers_the_raw_transcript_degraded_not_dropped() -> None:
@@ -233,3 +254,126 @@ def test_diarization_model_unavailable_at_connection_time_degrades_the_whole_ses
         assert event["segment"]["text"] == "fixture transcript"
         assert event["speaker"] is None
         assert "not installed" in event["speaker_error"]
+
+
+def test_final_events_carry_a_miscommunication_result_and_confidence_v2_when_the_check_succeeds() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript", confidence=0.8)
+    mt_provider = RecordingStubMTProvider(translated_text="fixture translation")
+    misco_checker = RecordingStubMiscommunicationChecker(
+        consistent=True, similarity_score=0.9, reason="matches closely"
+    )
+    app = _build_app(asr_provider, mt_provider, misco_checker=misco_checker)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["miscommunication"]["consistent"] is True
+        assert event["miscommunication"]["similarity_score"] == 0.9
+        assert event["miscommunication_error"] is None
+        # composite = 0.8 * 0.5 + 0.9 * 0.5 = 0.85 -> green band per Blueprint thresholds
+        assert event["confidence_v2"] == pytest.approx(0.85)
+        assert event["confidence_band"] == "green"
+    # The checker receives the original transcript and the (stubbed) back
+    # translation, not the forward translation.
+    assert misco_checker.calls == [("fixture transcript", "fixture translation")] * 2
+
+
+def test_miscommunication_check_failure_still_delivers_translation_degraded_not_dropped() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    mt_provider = RecordingStubMTProvider(translated_text="fixture translation")
+    misco_checker = RecordingStubMiscommunicationChecker(should_fail=True)
+    app = _build_app(asr_provider, mt_provider, misco_checker=misco_checker)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["translation"]["text"] == "fixture translation"  # earlier stage still present
+        assert event["miscommunication"] is None
+        assert "unavailable" in event["miscommunication_error"]
+        # No partial/fabricated composite score when a signal is missing.
+        assert event["confidence_v2"] is None
+        assert event["confidence_band"] is None
+
+
+def test_back_translation_failure_skips_miscommunication_check_but_keeps_forward_translation() -> None:
+    class ForwardOnlyMTProvider:
+        """Succeeds on HI->EN, fails on the EN->HI back leg."""
+
+        def translate(self, text: str, source_lang: str, target_lang: str) -> object:
+            from app.mt.schemas import TranslationSegment
+
+            if target_lang == "hi":
+                raise RuntimeError("back-translation unavailable")
+            return TranslationSegment(text="fixture translation", source_language=source_lang, target_language=target_lang)
+
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    misco_checker = RecordingStubMiscommunicationChecker()
+    app = _build_app(asr_provider, ForwardOnlyMTProvider(), misco_checker=misco_checker)  # type: ignore[arg-type]
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["translation"]["text"] == "fixture translation"
+        assert event["back_translation"] is None
+        assert "unavailable" in event["back_translation_error"]
+        assert event["miscommunication"] is None
+        assert event["miscommunication_error"] is None  # never even attempted, not a failure of its own
+    assert misco_checker.calls == []
+
+
+def test_finalized_utterances_are_recorded_in_orchestrator_with_a_consistent_session_id() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    mt_provider = RecordingStubMTProvider(translated_text="fixture translation")
+    orchestrator_client = RecordingStubOrchestratorClient()
+    app = _build_app(asr_provider, mt_provider, orchestrator_client=orchestrator_client)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            _finals_from(ws)
+
+    assert len(orchestrator_client.calls) == 2
+    session_ids = {call[0] for call in orchestrator_client.calls}
+    assert len(session_ids) == 1  # same WS connection -> same session_id throughout
+    for _session_id, _speaker, original_text, translated_text in orchestrator_client.calls:
+        assert original_text == "fixture transcript"
+        assert translated_text == "fixture translation"
+
+
+def test_orchestrator_recording_failure_does_not_crash_the_connection_or_drop_the_delivered_event() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    orchestrator_client = RecordingStubOrchestratorClient(should_fail=True)
+    app = _build_app(asr_provider, orchestrator_client=orchestrator_client)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            # The connection must survive the recording failure and keep
+            # delivering both finals, not drop the second one or hang.
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"

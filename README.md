@@ -11,8 +11,8 @@ Start here:
 
 ## Status
 
-Phase 3 (Bilingual Transcript UI + Speaker Diarization) complete — see `docs/PROGRESS.md`
-for the current session log and what's next.
+Phase 4 (Conversation Memory + Miscommunication Detector) complete — see
+`docs/PROGRESS.md` for the current session log and what's next.
 
 ## Repo layout
 
@@ -49,9 +49,9 @@ pip install -r requirements-dev.txt; pytest
 # instead of the fixture providers the tests use (heavy: pulls in torch):
 pip install -r requirements-full.txt
 
-# E2E (Playwright) -- needs the speech-pipeline .venv above to exist first
-# (requirements-dev.txt is enough; MEDIBRIDGE_FIXTURE_MODE means the real
-# model extras aren't needed for E2E)
+# E2E (Playwright) -- needs a .venv (requirements-dev.txt is enough --
+# MEDIBRIDGE_FIXTURE_MODE means the real model extras aren't needed) in
+# each of speech-pipeline, clinical-nlp, and orchestrator first
 cd apps/web; npx playwright install --with-deps chromium; npm run e2e
 ```
 

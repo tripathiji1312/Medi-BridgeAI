@@ -7,12 +7,16 @@ const repoRoot = path.resolve(__dirname, "../..");
 
 // Windows/POSIX venv layout differs; both are gitignored (.venv*/), created
 // per README.md's local-dev instructions or by ci-e2e.yml before this runs.
-const speechPipelineVenvPython = process.platform === "win32"
-  ? path.join(repoRoot, "services/speech-pipeline/.venv/Scripts/python.exe")
-  : path.join(repoRoot, "services/speech-pipeline/.venv/bin/python");
+function venvPython(serviceDir: string): string {
+  return process.platform === "win32"
+    ? path.join(repoRoot, serviceDir, ".venv/Scripts/python.exe")
+    : path.join(repoRoot, serviceDir, ".venv/bin/python");
+}
 
 const GATEWAY_PORT = 4100;
 const SPEECH_PIPELINE_PORT = 8101;
+const CLINICAL_NLP_PORT = 8102;
+const ORCHESTRATOR_PORT = 8104;
 const WEB_PORT = 5273;
 
 export default defineConfig({
@@ -45,12 +49,35 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `"${speechPipelineVenvPython}" -m uvicorn app.main:app --host 0.0.0.0 --port ${SPEECH_PIPELINE_PORT}`,
+      command: `"${venvPython("services/speech-pipeline")}" -m uvicorn app.main:app --host 0.0.0.0 --port ${SPEECH_PIPELINE_PORT}`,
       cwd: path.join(repoRoot, "services/speech-pipeline"),
       port: SPEECH_PIPELINE_PORT,
       reuseExistingServer: !process.env.CI,
       env: {
         MEDIBRIDGE_FIXTURE_MODE: "1",
+        PYTHONPATH: ".",
+        CLINICAL_NLP_URL: `http://localhost:${CLINICAL_NLP_PORT}`,
+        ORCHESTRATOR_URL: `http://localhost:${ORCHESTRATOR_PORT}`,
+      },
+      timeout: 30_000,
+    },
+    {
+      command: `"${venvPython("services/clinical-nlp")}" -m uvicorn app.main:app --host 0.0.0.0 --port ${CLINICAL_NLP_PORT}`,
+      cwd: path.join(repoRoot, "services/clinical-nlp"),
+      port: CLINICAL_NLP_PORT,
+      reuseExistingServer: !process.env.CI,
+      env: {
+        MEDIBRIDGE_FIXTURE_MODE: "1",
+        PYTHONPATH: ".",
+      },
+      timeout: 30_000,
+    },
+    {
+      command: `"${venvPython("services/orchestrator")}" -m uvicorn app.main:app --host 0.0.0.0 --port ${ORCHESTRATOR_PORT}`,
+      cwd: path.join(repoRoot, "services/orchestrator"),
+      port: ORCHESTRATOR_PORT,
+      reuseExistingServer: !process.env.CI,
+      env: {
         PYTHONPATH: ".",
       },
       timeout: 30_000,
@@ -64,6 +91,7 @@ export default defineConfig({
         GATEWAY_PORT: String(GATEWAY_PORT),
         JWT_SECRET: "e2e-test-secret",
         SPEECH_PIPELINE_WS_URL: `ws://localhost:${SPEECH_PIPELINE_PORT}/ws/transcribe`,
+        ORCHESTRATOR_URL: `http://localhost:${ORCHESTRATOR_PORT}`,
       },
       timeout: 30_000,
     },

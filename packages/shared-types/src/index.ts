@@ -45,6 +45,18 @@ export interface SpeakerAssignment {
   confidence: number;
 }
 
+/** Mirrors services/clinical-nlp/app/miscommunication/schemas.py
+ * MiscommunicationResult (also mirrored, in turn, by
+ * services/speech-pipeline/app/clinical_nlp/schemas.py on the Python side). */
+export interface MiscommunicationResult {
+  consistent: boolean;
+  similarity_score: number;
+  negation_flip_detected: boolean;
+  reason: string;
+}
+
+export type ConfidenceBand = "green" | "yellow" | "red";
+
 /** Mirrors services/speech-pipeline/app/asr/schemas.py TranscriptEvent --
  * the message shape sent over gateway's /ws/transcribe (proxied verbatim
  * from speech-pipeline, per AGENT_INSTRUCTIONS.md Section 2 gateway
@@ -52,10 +64,13 @@ export interface SpeakerAssignment {
 export interface TranscriptEvent {
   type: "partial" | "final" | "error";
   utterance_id: string;
+  // Set once per WebSocket connection (Blueprint Section 2.2) -- lets the
+  // client query orchestrator's conversation-memory API for this session.
+  session_id: string;
   segment: TranscriptSegment | null;
   error: string | null;
   latency_ms: number | null;
-  // Phase 2/3: only populated on final events. Each stage's failure is
+  // Phase 2/3/4: only populated on final events. Each stage's failure is
   // independent and never drops what earlier stages already computed -- the
   // raw Hindi text + confidence is always available even in fully degraded
   // mode (Blueprint Section 7.2).
@@ -65,4 +80,10 @@ export interface TranscriptEvent {
   tts_error: string | null;
   speaker: SpeakerAssignment | null;
   speaker_error: string | null;
+  back_translation: TranslationSegment | null;
+  back_translation_error: string | null;
+  miscommunication: MiscommunicationResult | null;
+  miscommunication_error: string | null;
+  confidence_v2: number | null;
+  confidence_band: ConfidenceBand | null;
 }

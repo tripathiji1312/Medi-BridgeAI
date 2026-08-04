@@ -1,2 +1,4 @@
-﻿"""Phase 5: curated Hindi/English medical term lexicons. Placeholder package -- no logic yet (Phase 0 scope is health checks only)."""
+﻿"""Curated deterministic lexicons (Blueprint Section 11.1: "deterministic
+lexicon backstop" for safety-critical terms). negation.py lands in Phase 4;
+the full medical term lexicon (symptoms/drugs/ICD-10 mapping) is Phase 5."""
 
