@@ -11,6 +11,9 @@
   "scripts": {
     "test:web": "npm run test --workspace=apps/web",
     "test:gateway": "npm run test --workspace=services/gateway",
-    "test:js": "npm run test:web && npm run test:gateway"
+    "test:js": "npm run test:web && npm run test:gateway",
+    "dev": "powershell -ExecutionPolicy Bypass -File scripts/dev-up.ps1",
+    "dev:real": "powershell -ExecutionPolicy Bypass -File scripts/dev-up.ps1 -Real",
+    "dev:stop": "powershell -ExecutionPolicy Bypass -File scripts/dev-down.ps1"
   }
 }

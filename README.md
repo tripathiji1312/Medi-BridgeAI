@@ -34,6 +34,27 @@ infra/               Docker Compose (dev), Kubernetes overlays
 Prerequisites: Node.js 20+, Python 3.11+, Docker (for Postgres/Redis/MinIO via
 `infra/docker/docker-compose.dev.yml`).
 
+### Run everything at once
+
+Once each service's venv exists and `npm install` has been run at the repo root
+(see the manual per-service commands below if you haven't done this yet):
+
+```powershell
+npm run dev        # fixture mode (deterministic, no model downloads) -- fastest
+npm run dev:real   # real ASR/MT/TTS/diarization/similarity models
+npm run dev:stop   # stop everything started by either of the above
+```
+
+This launches speech-pipeline, clinical-nlp, orchestrator, gateway, and the web
+app each in its own window (`scripts/dev-up.ps1`), wired to talk to each other on
+their default ports. Open the URL the "web" window prints (usually
+`http://localhost:5173`). `dev:stop` (`scripts/dev-down.ps1`) kills the whole
+process tree for each, including child processes uvicorn/npm spawn — closing the
+windows manually works too, but leaves orphaned child processes on Windows
+unless you close them individually.
+
+### Run services individually
+
 ```powershell
 # Frontend
 cd apps/web; npm install; npm test
