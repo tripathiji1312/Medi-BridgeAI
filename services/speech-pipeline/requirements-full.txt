@@ -5,3 +5,4 @@
 -r requirements-asr.txt
 -r requirements-mt.txt
 -r requirements-diarization.txt
+-r requirements-emotion.txt

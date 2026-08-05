@@ -74,6 +74,53 @@ describe("gateway memory proxy", () => {
     expect(response.statusCode).toBe(204);
   });
 
+  it("forwards POST dismissed-alerts requests with the body verbatim", async () => {
+    upstream = createServer((req, res) => {
+      expect(req.method).toBe("POST");
+      expect(req.url).toBe("/sessions/s1/dismissed-alerts");
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        expect(JSON.parse(raw)).toEqual({ reason: "false positive" });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ id: "d1", reason: "false positive", source_utterance_id: null }));
+      });
+    });
+    const upstreamPort = await listen(upstream);
+
+    app = await buildApp({
+      jwtSecret: "test-secret",
+      speechPipelineWsUrl: "ws://localhost:0",
+      orchestratorUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/s1/dismissed-alerts",
+      payload: { reason: "false positive" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().reason).toBe("false positive");
+  });
+
+  it("returns 503 with a reason when orchestrator is unreachable for a dismissed-alert POST", async () => {
+    app = await buildApp({
+      jwtSecret: "test-secret",
+      speechPipelineWsUrl: "ws://localhost:0",
+      orchestratorUrl: "http://127.0.0.1:1",
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/s1/dismissed-alerts",
+      payload: { reason: "false positive" },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toBe("orchestrator_unavailable");
+  });
+
   it("forwards a 404 from orchestrator (e.g. unknown entry) rather than masking it", async () => {
     upstream = createServer((_req, res) => {
       res.writeHead(404, { "Content-Type": "application/json" });

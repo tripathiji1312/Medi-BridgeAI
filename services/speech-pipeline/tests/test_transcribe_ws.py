@@ -16,10 +16,13 @@ from app.routes.transcribe_ws import create_transcribe_router
 from tests.stub_provider import (
     RecordingStubASRProvider,
     RecordingStubEmbeddingProvider,
+    RecordingStubEmergencyDetector,
+    RecordingStubEmotionClassifier,
     RecordingStubEntityExtractor,
     RecordingStubMiscommunicationChecker,
     RecordingStubMTProvider,
     RecordingStubOrchestratorClient,
+    RecordingStubRiskScorer,
     RecordingStubTTSProvider,
 )
 
@@ -40,6 +43,9 @@ def _build_app(
     misco_checker: RecordingStubMiscommunicationChecker | None = None,
     orchestrator_client: RecordingStubOrchestratorClient | None = None,
     entity_extractor: RecordingStubEntityExtractor | None = None,
+    emergency_detector: RecordingStubEmergencyDetector | None = None,
+    emotion_classifier: RecordingStubEmotionClassifier | None = None,
+    risk_scorer: RecordingStubRiskScorer | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(
@@ -51,6 +57,9 @@ def _build_app(
             (lambda: misco_checker) if misco_checker is not None else None,
             (lambda: orchestrator_client) if orchestrator_client is not None else None,
             (lambda: entity_extractor) if entity_extractor is not None else None,
+            (lambda: emergency_detector) if emergency_detector is not None else None,
+            (lambda: emotion_classifier) if emotion_classifier is not None else None,
+            (lambda: risk_scorer) if risk_scorer is not None else None,
         )
     )
     return app
@@ -469,3 +478,174 @@ def test_entity_extraction_only_runs_on_finals_not_partials() -> None:
     # No MT provider here, so only the Hindi-side extraction runs (no
     # translation to extract from) -- one call per final, none per partial.
     assert entity_extractor.calls == [("fixture transcript", "hi")] * 2
+
+
+def test_final_events_carry_an_emergency_result_when_the_check_succeeds() -> None:
+    asr_provider = RecordingStubASRProvider(text="chest pain")
+    emergency_detector = RecordingStubEmergencyDetector(alert=True, reason="Detected emergency keyword(s): chest pain.")
+    app = _build_app(asr_provider, emergency_detector=emergency_detector)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["emergency"]["alert"] is True
+        assert "chest pain" in event["emergency"]["reason"]
+        assert event["emergency_error"] is None
+    assert emergency_detector.calls == [("chest pain", "hi")] * 2
+
+
+def test_emergency_detection_failure_still_delivers_transcript_degraded_not_dropped() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    emergency_detector = RecordingStubEmergencyDetector(should_fail=True)
+    app = _build_app(asr_provider, emergency_detector=emergency_detector)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"
+        assert event["emergency"] is None
+        assert "unavailable" in event["emergency_error"]
+
+
+def test_emergency_detection_runs_on_the_hindi_original_regardless_of_translation() -> None:
+    # Blueprint Section 3.2 step 10: emergency detection must not wait on
+    # (or depend on) translation succeeding -- proven here by it running
+    # correctly with no MT provider configured at all.
+    asr_provider = RecordingStubASRProvider(text="chest pain")
+    emergency_detector = RecordingStubEmergencyDetector(alert=True, reason="Detected emergency keyword(s): chest pain.")
+    app = _build_app(asr_provider, emergency_detector=emergency_detector)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    assert finals[0]["emergency"]["alert"] is True
+
+
+def test_final_events_carry_an_emotion_assessment_when_classification_succeeds() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    emotion_classifier = RecordingStubEmotionClassifier(label="anxious", confidence=0.7, reason="stub reason")
+    app = _build_app(asr_provider, emotion_classifier=emotion_classifier)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["emotion"]["label"] == "anxious"
+        assert event["emotion"]["confidence"] == 0.7
+        assert event["emotion"]["disclaimer"] == "Estimated from voice tone, not verified."
+        assert event["emotion_error"] is None
+    assert len(emotion_classifier.calls) == 2
+
+
+def test_emotion_classification_failure_still_delivers_transcript_degraded_not_dropped() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    emotion_classifier = RecordingStubEmotionClassifier(should_fail=True)
+    app = _build_app(asr_provider, emotion_classifier=emotion_classifier)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"
+        assert event["emotion"] is None
+        assert "unavailable" in event["emotion_error"]
+
+
+def test_emotion_classification_only_runs_on_finals_not_partials() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    emotion_classifier = RecordingStubEmotionClassifier()
+    app = _build_app(asr_provider, emotion_classifier=emotion_classifier)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            _finals_from(ws)
+
+    assert len(emotion_classifier.calls) == 2
+
+
+def test_final_events_carry_a_risk_assessment_and_pass_the_emotion_signal_through() -> None:
+    asr_provider = RecordingStubASRProvider(text="I have chest pain")
+    emotion_classifier = RecordingStubEmotionClassifier(label="fearful", confidence=0.8, reason="stub reason")
+    risk_scorer = RecordingStubRiskScorer(level="high", raw_level="high", reason="stub reason", emergency_triggered=True)
+    app = _build_app(asr_provider, emotion_classifier=emotion_classifier, risk_scorer=risk_scorer)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["risk"]["level"] == "high"
+        assert event["risk_error"] is None
+    # Risk scoring receives the emotion signal computed earlier in the same
+    # chain, not a bare text -- proves the cross-stage composition works.
+    for call in risk_scorer.calls:
+        assert call[2] == "fearful"
+        assert call[3] == 0.8
+
+
+def test_risk_scoring_failure_still_delivers_transcript_degraded_not_dropped() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    risk_scorer = RecordingStubRiskScorer(should_fail=True)
+    app = _build_app(asr_provider, risk_scorer=risk_scorer)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"
+        assert event["risk"] is None
+        assert "unavailable" in event["risk_error"]
+
+
+def test_risk_scoring_only_runs_on_finals_not_partials() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    risk_scorer = RecordingStubRiskScorer()
+    app = _build_app(asr_provider, risk_scorer=risk_scorer)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            _finals_from(ws)
+
+    assert len(risk_scorer.calls) == 2

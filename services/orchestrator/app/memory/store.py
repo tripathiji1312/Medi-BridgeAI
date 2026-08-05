@@ -17,8 +17,10 @@ import uuid
 
 from app.memory.schemas import (
     AddCaseMemoryEntryRequest,
+    AddDismissedAlertRequest,
     AppendUtteranceRequest,
     CaseMemoryEntry,
+    DismissedAlert,
     SessionMemory,
     Utterance,
 )
@@ -38,7 +40,9 @@ class MemoryStore:
 
     def _get_or_create(self, session_id: str) -> SessionMemory:
         if session_id not in self._sessions:
-            self._sessions[session_id] = SessionMemory(session_id=session_id, utterances=[], case_memory=[])
+            self._sessions[session_id] = SessionMemory(
+                session_id=session_id, utterances=[], case_memory=[], dismissed_alerts=[]
+            )
         return self._sessions[session_id]
 
     def append_utterance(self, session_id: str, request: AppendUtteranceRequest) -> Utterance:
@@ -76,6 +80,14 @@ class MemoryStore:
         memory.case_memory = [e for e in memory.case_memory if e.id != entry_id]
         if len(memory.case_memory) == before:
             raise CaseMemoryEntryNotFoundError(entry_id)
+
+    def add_dismissed_alert(self, session_id: str, request: AddDismissedAlertRequest) -> DismissedAlert:
+        memory = self._get_or_create(session_id)
+        entry = DismissedAlert(
+            id=uuid.uuid4().hex, reason=request.reason, source_utterance_id=request.source_utterance_id
+        )
+        memory.dismissed_alerts.append(entry)
+        return entry
 
     def get_memory(self, session_id: str) -> SessionMemory:
         if session_id not in self._sessions:

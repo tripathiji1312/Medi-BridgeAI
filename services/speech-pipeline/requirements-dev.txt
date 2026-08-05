@@ -3,3 +3,8 @@ pytest==8.3.3
 pytest-cov==6.0.0
 mypy==1.13.0
 ruff==0.7.3
+# numpy is lightweight (unlike torch/faster-whisper) -- included here, not
+# just in requirements-emotion.txt, so app.emotion.features' real DSP can be
+# unit-tested with synthetic audio in the standard suite, not just manually
+# smoke-tested like the heavier real providers.
+numpy>=1.26,<3.0

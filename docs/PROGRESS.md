@@ -5,24 +5,24 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 5 — Clinical NLP: NER, Symptom Extraction, Keyword
-  Highlighting — done
-- **Last completed task:** clinical-nlp now runs deterministic Hindi/English medical
-  lexicon matching (37-term curated lexicon, 6 categories, exact + fuzzy matching via
-  `difflib.SequenceMatcher`, span-grounded, overlap-resolved) behind a new
-  `POST /entities/extract` endpoint. speech-pipeline calls it for both the Hindi
-  original and the English translation of every final utterance, independently
-  degradable like every other enrichment stage. apps/web inline-highlights matched
-  terms in the transcript (tooltip with category/definition/ICD-10/confidence, never
-  a bare label) and shows a categorized "Detected medical terms" panel
-  (Symptoms/Diseases/Medications/Allergies/Vital signs/Procedures). Verified with a
-  real E2E spec against real running services in fixture mode.
+- **Current phase:** Phase 6 — Risk Scoring, Emergency Detection, Emotion — done
+- **Last completed task:** clinical-nlp now runs a fast, deterministic emergency
+  keyword/phrase detector (`POST /emergency/detect`, FAST stroke criteria + severe
+  bleeding added to the lexicon) and a Low/Medium/High risk scorer with per-session
+  hysteresis (`POST /risk/score`, escalation/de-escalation both require 2 consecutive
+  turns except a real emergency match, which forces High immediately). speech-pipeline
+  now classifies emotion from each utterance's own audio using real acoustic feature
+  extraction (autocorrelation pitch tracking + RMS energy, pure numpy DSP -- no
+  pretrained model) through a deterministic, documented threshold classifier, and runs
+  emergency detection first in its enrichment chain (before translation/anything
+  else) to minimize alert latency. apps/web shows a persistent, dismiss-with-reason
+  emergency banner (audible cue, dismissal logged to a new orchestrator endpoint for
+  audit), a risk badge, and a tone indicator with its disclaimer -- all with real E2E
+  coverage against real running services in fixture mode.
 - **Known issues / deferred items:** see "Deferred" under each session entry below.
-- **Next recommended task:** Phase 6 per Blueprint Section 8 (Risk Scoring +
-  Emergency Detection) — clinical-nlp already has the categorized entity stream this
-  needs (`is_emergency_keyword` is already on every lexicon term but not yet acted on
-  anywhere), and orchestrator's structured case-memory store (built in Phase 4, still
-  not auto-populated) is a natural next consumer of these extracted entities.
+- **Next recommended task:** Phase 7 per Blueprint Section 8 (Summary, Timeline,
+  Analytics) — the structured case-memory store (Phase 4) and now the risk/emergency
+  signal stream (Phase 6) both feed naturally into a session summary and timeline.
 
 ---
 
@@ -1015,6 +1015,239 @@ option would only work on half the transcript anyway.
 - **No new external dependency was added.** `difflib` is Python stdlib; this phase's
   only new "dependency" is the JSON lexicon file itself, which is data, not code —
   nothing required flagging under AGENT_INSTRUCTIONS.md Section 6.
+
+---
+
+### Session 7 — 2026-08-05 — Phase 6: Risk Scoring, Emergency Detection, Emotion
+
+**Architecture decisions, made explicit rather than silently assumed:**
+
+1. **Emergency detection and risk scoring both live in clinical-nlp** (not
+   speech-pipeline), per AGENT_INSTRUCTIONS.md's service-boundary table --
+   emergency/risk are text-domain reasoning over already-transcribed content, not
+   audio processing. **Emotion classification lives in speech-pipeline** (not
+   clinical-nlp) -- it's derived directly from raw audio, which is squarely
+   speech-pipeline's domain and explicitly listed as `NOT` clinical-nlp's job.
+2. **Emotion is a real, deterministic prosody-feature classifier, not a pretrained
+   model.** Blueprint Section 4's own architecture table specifies this exact
+   approach ("Prosody-feature classifier ... Explainable, not a black-box
+   end-to-end audio LLM"), and no labeled 7-class emotion training data exists in
+   this project to honestly back a trained classifier head the way, e.g., NLLB or
+   ECAPA-TDNN are real pretrained models for their tasks. Implemented as: real
+   autocorrelation-based pitch tracking + RMS energy extraction (pure numpy DSP,
+   `app/emotion/features.py`) feeding a documented, ordered threshold decision tree
+   (`app/emotion/rules.py`) where every branch's reason string names the exact
+   acoustic pattern that triggered it. Explicitly, honestly limited: prosody
+   captures *arousal* (energy/pitch activation), not *valence* (positive/negative)
+   -- Happy and Angry can look acoustically identical, so the "happy" branch has an
+   explicit lower confidence ceiling (0.55) and its reason string says so plainly,
+   rather than presenting a falsely confident label. Verified against synthetic
+   signals with known ground truth (a pure sine wave's detected pitch matches its
+   actual frequency within 5-10Hz; silence is correctly judged unvoiced) since this
+   repo has no recorded human emotional speech to test against.
+3. **Numpy added as a real, direct dependency** (`requirements-emotion.txt` +
+   `requirements-dev.txt`) -- flagged per AGENT_INSTRUCTIONS.md Section 1, though
+   low-risk: numpy was already a declared (if previously unused-in-dev)
+   dependency of the real ASR provider (`requirements-asr.txt`). Unlike torch/
+   faster-whisper, it's lightweight enough to include in the standard dev/test
+   install, which let `app/emotion/features.py`'s real DSP be genuinely
+   unit-tested (not just manually smoke-tested like the heavier real providers).
+   Hit and fixed a real mypy/numpy incompatibility this surfaced: numpy 2.5's own
+   `.pyi` stubs use PEP 695 `type` statement syntax, which mypy refuses to parse
+   when `python_version < "3.12"`. Bumped speech-pipeline's mypy `python_version`
+   to 3.12 (only this service, not the other three, which don't depend on numpy) --
+   this only changes what syntax mypy assumes is available while type-checking; it
+   does not change the project's actual minimum supported runtime
+   (`README.md`: "Python 3.11+").
+4. **Emergency detection runs first in speech-pipeline's enrichment chain**, before
+   translation or anything else, on the Hindi original -- Blueprint Section 3.2
+   step 10 explicitly requires this ("Emergency keyword hits short-circuit the
+   pipeline ... before waiting on the full NLP pass, to minimize latency for
+   critical alerts"). It's implemented as its own dedicated, deterministic
+   endpoint (`POST /emergency/detect`) rather than "filter the general entity
+   extraction results" -- reuses the same lexicon-matching engine internally
+   (restricted to `is_emergency_keyword`-flagged terms) but stays a fully
+   independent, simple code path since it gates a safety-critical alert.
+5. **Risk-level hysteresis lives inside clinical-nlp itself**
+   (`app/risk_scoring/hysteresis.py`), as small in-process per-session working
+   memory for one algorithm's smoothing -- not orchestrator's "session state /
+   conversation memory" (AGENT_INSTRUCTIONS.md Section 2). Considered and rejected
+   centralizing this in orchestrator: the smoothing state (last couple of raw risk
+   observations) is purely an implementation detail of clinical-nlp's own scoring
+   algorithm that no other service or feature needs to read, unlike conversation
+   memory or case memory which are genuinely cross-cutting. Escalation and
+   de-escalation both require 2 consecutive same-direction raw observations before
+   the *displayed* level changes, except a genuine emergency match, which forces
+   "high" immediately, bypassing confirmation entirely (Blueprint Section 12.2:
+   "emergency keyword fires simultaneously with a low ASR confidence score --
+   verify alert still fires ... safety path is not gated by general confidence" --
+   extended here to mean it's not gated by hysteresis either).
+6. **Emergency-alert dismissal needs "logged for audit" (Blueprint Section 2.2),
+   but the real Phase 9 "immutable append-only audit log" is explicitly out of
+   scope** (see `services/orchestrator/app/audit/__init__.py`'s own placeholder
+   docstring, unchanged this phase). Rather than silently skip the requirement or
+   prematurely build Phase 9's system, added a minimal, honestly-scoped
+   `dismissed_alerts` list to orchestrator's existing per-session `SessionMemory`
+   (`POST /sessions/{id}/dismissed-alerts`) -- explicitly documented in its own
+   schema docstring as a precursor to, not a replacement for, Phase 9's real audit
+   log. This is the one Phase 6 write that's genuinely browser-initiated (a
+   clinician typing a dismissal reason), so it's also the one new gateway proxy
+   route this phase needed.
+
+**What was built:**
+- `services/clinical-nlp/app/lexicons/medical_terms.json` (bumped to v1.1.0): added
+  severe bleeding, facial drooping, one-sided weakness, slurred speech, and stroke
+  entries (FAST criteria), each `is_emergency_keyword: true` with both exact-phrase
+  and natural-copula-inserted variants ("face is drooping", "speech is slurred") --
+  found and fixed a real recall gap where the fuzzy-match window's contiguous-words
+  design couldn't catch "face is drooping" against the variant "face drooping"
+  (the inserted "is" breaks the sliding window), so added the natural phrasing
+  directly as its own lexicon variant rather than changing the matching algorithm.
+- `services/clinical-nlp/app/emergency_detector/`: `detector.py` (`detect_emergency`
+  reusing `app.ner.extractor` restricted to emergency-flagged terms, `build_reason`
+  naming every matched term), `schemas.py`, wired via `app/routes/emergency.py`'s
+  `POST /emergency/detect`. Filled in the Phase-0-scaffolded placeholder package
+  (moved my first draft, initially written under a new `app/emergency/` dir, into
+  this pre-existing scaffold once I noticed it -- caught before it shipped as a
+  needless duplicate directory).
+- `services/clinical-nlp/app/risk_scoring/`: `scorer.py` (`compute_raw_risk` --
+  emergency match forces "high"; >=2 symptoms or 1 symptom + a concerning emotion
+  [fearful/stressed/anxious] at >=0.5 confidence forces "medium"; otherwise "low" --
+  always returns a reason naming the actual symptoms/emotion involved),
+  `hysteresis.py` (`RiskHistoryStore`/`_SessionHysteresis`, the 2-consecutive-turn
+  confirmation rule described above), `schemas.py`, wired via `app/routes/risk.py`'s
+  `POST /risk/score` + `DELETE /risk/sessions/{id}`. Same placeholder-scaffold fix
+  as emergency_detector.
+- `services/speech-pipeline/app/emotion/`: `schemas.py` (`EmotionCategory` 7-class
+  Literal, `EmotionAssessment` with an always-attached `disclaimer` constant),
+  `provider.py` (`EmotionClassifier` Protocol), `features.py` (real autocorrelation
+  pitch tracker + RMS energy, numpy), `rules.py` (the documented threshold decision
+  tree), `prosody_classifier.py` (`ProsodyEmotionClassifier`, the real
+  implementation), `fixture_provider.py` (`FixtureEmotionClassifier` digest-keyed,
+  `StaticEmotionClassifier` always-neutral for E2E determinism),
+  `provider_factory.py` (fixture-mode switch, same pattern as every other
+  provider).
+- `services/speech-pipeline/app/clinical_nlp/`: added `EmergencyDetector`/
+  `RiskScorer` Protocols, `HttpEmergencyDetector`/`HttpRiskScorer` implementations,
+  factory functions -- same Protocol+impl+factory pattern as every other
+  cross-service client here. `app/asr/schemas.py`: added `emergency`/
+  `emergency_error`, `emotion`/`emotion_error`, `risk`/`risk_error` to
+  `TranscriptEvent`.
+- `services/speech-pipeline/app/routes/transcribe_ws.py`: `_run_emergency_detection`
+  now runs FIRST in `_enrich_final_event`'s chain (before `_run_translation`),
+  `_run_emotion_classification` runs on the utterance's own buffered audio (reusing
+  `StreamingASRSession.get_utterance_audio`, the same access diarization already
+  uses) after diarization/entity extraction, and `_run_risk_scoring` runs last,
+  composing the emotion label/confidence computed earlier in the same chain into
+  its request to clinical-nlp -- proven by a dedicated test
+  (`test_final_events_carry_a_risk_assessment_and_pass_the_emotion_signal_through`)
+  that asserts the risk scorer stub actually received the emotion stub's label.
+- `services/orchestrator/app/memory/`: added `DismissedAlert`/
+  `AddDismissedAlertRequest` schemas, `MemoryStore.add_dismissed_alert`,
+  `SessionMemory.dismissed_alerts`, and `POST /sessions/{id}/dismissed-alerts`.
+- `services/gateway/src/routes/memory.ts`: added the one new browser-initiated
+  proxy route (`POST /sessions/:id/dismissed-alerts`) per the architecture
+  decision above.
+- `packages/design-tokens`: `emotionColors` (7-category palette, light+dark). Risk
+  level deliberately reuses the existing `confidenceGreen`/`Yellow`/`Red` tokens
+  (same traffic-light semantics) rather than a new color set.
+- `apps/web`: `RiskBadge` (color-coded level + reason, always both), `EmotionIndicator`
+  (label + confidence chip, tooltip carries the reason AND the disclaimer),
+  `EmergencyAlertCard` (persistent `alertdialog`, plays a Web-Audio beep once per
+  mount -- not on every re-render, which would itself be an alarm-fatigue problem --
+  requires a typed reason to dismiss, never a bare click), `useDismissAlert` hook
+  (POSTs to the new gateway route, surfaces a logging failure separately from the
+  dismissal itself so a clinician can still clear a false alarm even if the audit
+  POST fails, without that failure being silent). Wired into `LiveTranscriptPanel`:
+  one persistent banner for the most recent un-dismissed alert (tracked via a local
+  `Set` of dismissed utterance ids, not one card per matching utterance in the
+  scrolling list), per-utterance risk badge + emotion indicator + three new
+  degraded-mode banners (`emergency_error`/`emotion_error`/`risk_error`).
+
+**Tests (all genuinely run, not just written):**
+- clinical-nlp: 34 new tests (emergency detector incl. the Section 12.2 negative
+  case "chest of drawers" containing the word "chest" without matching the phrase
+  "chest pain"; emergency route; risk scorer incl. emergency-forces-high and
+  low-confidence-emotion-does-not-escalate; risk hysteresis incl. both the
+  single-turn-flip-prevented and sustained-evidence-escalates cases from Blueprint
+  Section 12.1; risk route incl. hysteresis persisting across HTTP requests for the
+  same session) -- 64 total, all green.
+- speech-pipeline: 35 new tests (emotion features against synthetic sine-wave/
+  silence signals with known ground truth; emotion rules, one per decision-tree
+  branch plus confidence-bounds and disclaimer checks; emotion fixture/static
+  providers; provider-factory fixture-mode switch, including a test explaining why
+  the non-fixture-mode branch succeeds here unlike ASR/MT/diarization's real
+  RuntimeError-when-uninstalled test, since numpy actually is installed;
+  clinical_nlp HTTP client tests for the two new endpoints; 10 new
+  enrichment-chain integration tests covering emergency/emotion/risk success,
+  independent-failure degradation, partials-are-skipped, and the cross-stage
+  emotion-into-risk composition) -- 87 total, all green.
+- orchestrator: 3 new tests (dismissed-alert store add + session isolation, route
+  add-then-appears-in-memory) -- 16 total, all green.
+- gateway: 2 new tests (dismissed-alerts POST forwards body/status verbatim, 503
+  when orchestrator is unreachable) -- 13 total, all green.
+- apps/web: 26 new tests (RiskBadge, EmotionIndicator, EmergencyAlertCard incl. the
+  audio-plays-once-not-on-rerender and reason-required-to-dismiss cases,
+  useDismissAlert incl. no-session/failure-status/thrown-error paths, plus 2 new
+  LiveTranscriptPanel integration scenarios: risk+emotion display, and the full
+  emergency banner -> dismiss-with-reason -> audit-POST -> banner-hidden flow) --
+  82 total, all green.
+- E2E: 2 new specs (`apps/web/e2e/phase6.spec.ts`) against real running services in
+  `MEDIBRIDGE_FIXTURE_MODE` -- Low risk badge + Neutral tone indicator on the
+  deterministic fixture path (StaticASRProvider's fixed romanized-Hindi text has no
+  lexicon match, same reason documented in Phase 5's E2E spec), and no emergency
+  banner on the routine path. A genuine "alert fires end-to-end" E2E scenario isn't
+  covered -- `StaticASRProvider`'s canned text isn't configurable per E2E run
+  without changing what phase4/phase5's specs already depend on -- documented as a
+  deliberate coverage choice below, not an oversight; that path is proven instead
+  at the unit/integration/component layers listed above. Full suite: 14/14 E2E
+  specs green.
+- Full regression: 167 Python (64+87+16) + 95 JS (82 web + 13 gateway) unit/
+  integration tests, 14/14 E2E specs, all green; mypy --strict/ruff/tsc/eslint all
+  clean across every touched service.
+
+**Deferred, explicitly:**
+- **No E2E coverage of a real emergency alert actually firing end-to-end** (see
+  above) -- covered instead by clinical-nlp's emergency route tests +
+  speech-pipeline's enrichment-chain tests (with a stub emergency detector
+  reporting `alert=true` flowing through the real WS route) + apps/web's
+  EmergencyAlertCard/LiveTranscriptPanel tests simulating the full alert payload.
+  Revisit if `StaticASRProvider`'s fixed text is ever made configurable per test
+  run (e.g. via a query param or env var threaded through the E2E harness) without
+  breaking phase4/phase5's existing assumptions about its value.
+- **Risk-scoring thresholds (2+ symptoms for Medium, 0.5 emotion-confidence floor)
+  and the emotion classifier's acoustic thresholds are qualitative starting
+  points**, not tuned against a labeled gold set -- same standing caveat as every
+  other heuristic threshold introduced this build (diarization clustering,
+  miscommunication similarity, fuzzy-match ratio), flagged for revisit once
+  `scripts/model-eval/`'s offline eval harness exists and real consultation
+  transcripts/audio are available to tune against.
+- **Emotion cannot reliably distinguish Happy from Angry/excited** (both are
+  high-arousal, low information from pitch/energy alone about valence) -- a real,
+  documented limitation of prosody-only features, not a bug. The "happy" branch's
+  confidence is explicitly capped lower (0.55) and its reason string says so; a
+  true fix would need a different signal (lexical sentiment from the transcript
+  text, which the emotion classifier deliberately doesn't use since it's meant to
+  be an audio-only, transcript-independent signal) rather than a better DSP
+  threshold.
+- **`dismissed_alerts` is not Phase 9's real audit log** (see architecture decision
+  6 above) -- no immutability guarantee, no cross-session audit trail UI, no
+  export. It exists only so Blueprint Section 2.2's dismissal-logging requirement
+  isn't silently skipped; Phase 9 is still where the real system gets built.
+- **The "emergency keyword detected but immediately retracted/corrected by
+  speaker" edge case** (Blueprint Section 7.3) is handled implicitly, not
+  explicitly tested end-to-end: emergency detection is fully stateless and
+  per-utterance (no debouncing/memory of prior alerts at the detection layer
+  itself), so a correction naturally produces its own fresh, independent
+  evaluation on the next utterance. Both the original alert and its dismissal (if
+  the clinician dismisses rather than waiting for it to naturally stop
+  re-triggering) are logged via `dismissed_alerts`. Not given its own dedicated
+  test scenario this phase; the underlying stateless-per-utterance design is
+  covered by the broader enrichment-chain test suite.
+- **Risk level does not yet feed into the structured case-memory store or a
+  session-level analytics/timeline view** -- Blueprint Section 8 places "Summary,
+  Timeline, Analytics" at Phase 7, not this phase; noted in the Status Snapshot
+  above as the natural next task.
 
 ---
 

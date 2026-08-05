@@ -75,6 +75,53 @@ export interface MedicalEntity {
   is_fuzzy_match: boolean;
 }
 
+/** Mirrors services/clinical-nlp/app/emergency_detector/schemas.py
+ * EmergencyDetectionResponse. `alert` is never shown bare -- `reason`
+ * always names the matched phrase(s) (Blueprint Section 1 Principle 2). */
+export interface EmergencyDetectionResult {
+  alert: boolean;
+  matches: MedicalEntity[];
+  reason: string | null;
+  lexicon_version: string;
+}
+
+/** Mirrors services/speech-pipeline/app/emotion/schemas.py EmotionCategory
+ * (Blueprint Section 2.2: "7-class (Calm, Anxious, Fearful, Stressed,
+ * Angry, Happy, Neutral)"). */
+export type EmotionCategory = "calm" | "anxious" | "fearful" | "stressed" | "angry" | "happy" | "neutral";
+
+/** Mirrors services/speech-pipeline/app/emotion/schemas.py
+ * EmotionAssessment. `disclaimer` is always present -- Blueprint Section
+ * 2.2's explicit "estimated from voice tone, not verified" requirement. */
+export interface EmotionAssessment {
+  label: EmotionCategory;
+  confidence: number;
+  reason: string;
+  disclaimer: string;
+}
+
+export type RiskLevel = "low" | "medium" | "high";
+
+/** Mirrors services/clinical-nlp/app/risk_scoring/schemas.py
+ * RiskAssessment. `level` is the hysteresis-smoothed value to display;
+ * `raw_level` is what this single utterance alone would score (Blueprint
+ * Section 7.3: smoothing must be auditable, not a black box). */
+export interface RiskAssessment {
+  level: RiskLevel;
+  raw_level: RiskLevel;
+  reason: string;
+  emergency_triggered: boolean;
+  symptom_count: number;
+  lexicon_version: string;
+}
+
+/** Mirrors services/orchestrator/app/memory/schemas.py DismissedAlert. */
+export interface DismissedAlert {
+  id: string;
+  reason: string;
+  source_utterance_id: string | null;
+}
+
 /** Mirrors services/speech-pipeline/app/asr/schemas.py TranscriptEvent --
  * the message shape sent over gateway's /ws/transcribe (proxied verbatim
  * from speech-pipeline, per AGENT_INSTRUCTIONS.md Section 2 gateway
@@ -112,4 +159,13 @@ export interface TranscriptEvent {
   entities_error: string | null;
   translation_entities: MedicalEntity[] | null;
   translation_entities_error: string | null;
+  // Phase 6 additions. Also final-only, also independently degradable.
+  // emergency is checked first server-side, before translation/anything
+  // else, to minimize alert latency (Blueprint Section 3.2 step 10).
+  emergency: EmergencyDetectionResult | null;
+  emergency_error: string | null;
+  emotion: EmotionAssessment | null;
+  emotion_error: string | null;
+  risk: RiskAssessment | null;
+  risk_error: string | null;
 }

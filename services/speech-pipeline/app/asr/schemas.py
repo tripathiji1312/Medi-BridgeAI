@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.clinical_nlp.schemas import MedicalEntity, MiscommunicationResult
+from app.clinical_nlp.schemas import EmergencyDetectionResult, MedicalEntity, MiscommunicationResult, RiskAssessment
 from app.diarization.schemas import SpeakerAssignment
+from app.emotion.schemas import EmotionAssessment
 from app.mt.schemas import TranslationSegment
 from app.tts.schemas import TTSAudioSegment
 
@@ -88,3 +89,22 @@ class TranscriptEvent(BaseModel):
     entities_error: str | None = None
     translation_entities: list[MedicalEntity] | None = None
     translation_entities_error: str | None = None
+
+    # Phase 6 additions. Also final-only, also independently degradable.
+    # emergency is checked first in the enrichment chain, before
+    # translation/entities/anything else (Blueprint Section 3.2 step 10:
+    # "Emergency keyword hits short-circuit the pipeline ... before waiting
+    # on the full NLP pass"), so a real alert reaches the client with the
+    # least possible added latency regardless of what any other stage does.
+    emergency: EmergencyDetectionResult | None = None
+    emergency_error: str | None = None
+    # emotion is derived from this utterance's own audio (speech-pipeline's
+    # job, per AGENT_INSTRUCTIONS.md Section 2 -- audio processing stays
+    # here, not in clinical-nlp).
+    emotion: EmotionAssessment | None = None
+    emotion_error: str | None = None
+    # risk composes symptom entities + the emergency result + the emotion
+    # signal (all computed above) -- clinical-nlp's job, so it runs last
+    # among this phase's additions, after its inputs exist.
+    risk: RiskAssessment | None = None
+    risk_error: str | None = None

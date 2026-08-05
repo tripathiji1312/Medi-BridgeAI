@@ -1,8 +1,14 @@
 from fastapi import FastAPI
 
 from app.asr.provider_factory import get_asr_provider
-from app.clinical_nlp.provider_factory import get_entity_extractor, get_miscommunication_checker
+from app.clinical_nlp.provider_factory import (
+    get_emergency_detector,
+    get_entity_extractor,
+    get_miscommunication_checker,
+    get_risk_scorer,
+)
 from app.diarization.provider_factory import get_embedding_provider
+from app.emotion.provider_factory import get_emotion_classifier
 from app.health import HealthResponse
 from app.mt.provider_factory import get_mt_provider
 from app.orchestrator_client_factory import get_orchestrator_client
@@ -22,6 +28,9 @@ app.include_router(
         get_miscommunication_checker,
         get_orchestrator_client,
         get_entity_extractor,
+        get_emergency_detector,
+        get_emotion_classifier,
+        get_risk_scorer,
     )
 )
 

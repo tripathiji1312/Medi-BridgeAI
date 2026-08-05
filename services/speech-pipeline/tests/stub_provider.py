@@ -11,7 +11,14 @@ import base64
 from dataclasses import dataclass, field
 
 from app.asr.schemas import TranscriptSegment
-from app.clinical_nlp.schemas import MedicalEntity, MiscommunicationResult
+from app.clinical_nlp.schemas import (
+    EmergencyDetectionResult,
+    MedicalEntity,
+    MiscommunicationResult,
+    RiskAssessment,
+    RiskLevel,
+)
+from app.emotion.schemas import EmotionAssessment, EmotionCategory
 from app.mt.schemas import TranslationSegment
 from app.tts.schemas import TTSAudioSegment
 
@@ -144,3 +151,66 @@ class RecordingStubEntityExtractor:
         if self.should_fail:
             raise RuntimeError("clinical-nlp unavailable")
         return self.entities
+
+
+@dataclass
+class RecordingStubEmergencyDetector:
+    alert: bool = False
+    matches: list[MedicalEntity] = field(default_factory=list)
+    reason: str | None = None
+    calls: list[tuple[str, str]] = field(default_factory=list)
+    should_fail: bool = False
+
+    async def detect(self, text: str, language: str) -> EmergencyDetectionResult:
+        self.calls.append((text, language))
+        if self.should_fail:
+            raise RuntimeError("clinical-nlp unavailable")
+        return EmergencyDetectionResult(
+            alert=self.alert, matches=self.matches, reason=self.reason, lexicon_version="stub"
+        )
+
+
+@dataclass
+class RecordingStubEmotionClassifier:
+    label: EmotionCategory = "neutral"
+    confidence: float = 0.5
+    reason: str = "stub reason"
+    calls: list[bytes] = field(default_factory=list)
+    should_fail: bool = False
+
+    def classify(self, pcm16_mono: bytes, sample_rate: int) -> EmotionAssessment:
+        self.calls.append(pcm16_mono)
+        if self.should_fail:
+            raise RuntimeError("emotion classifier unavailable")
+        return EmotionAssessment(label=self.label, confidence=self.confidence, reason=self.reason)
+
+
+@dataclass
+class RecordingStubRiskScorer:
+    level: RiskLevel = "low"
+    raw_level: RiskLevel = "low"
+    reason: str = "stub reason"
+    emergency_triggered: bool = False
+    symptom_count: int = 0
+    calls: list[tuple[str, str, str | None, float | None]] = field(default_factory=list)
+    should_fail: bool = False
+
+    async def score(
+        self,
+        session_id: str,
+        text: str,
+        language: str,
+        emotion_label: EmotionCategory | None,
+        emotion_confidence: float | None,
+    ) -> RiskAssessment:
+        self.calls.append((session_id, text, emotion_label, emotion_confidence))
+        if self.should_fail:
+            raise RuntimeError("clinical-nlp unavailable")
+        return RiskAssessment(
+            level=self.level,
+            raw_level=self.raw_level,
+            reason=self.reason,
+            emergency_triggered=self.emergency_triggered,
+            symptom_count=self.symptom_count,
+            lexicon_version="stub",
+        )

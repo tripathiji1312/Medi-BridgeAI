@@ -9,8 +9,13 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from app.clinical_nlp.http_provider import HttpEntityExtractor, HttpMiscommunicationChecker
-from app.clinical_nlp.provider import EntityExtractor, MiscommunicationChecker
+from app.clinical_nlp.http_provider import (
+    HttpEmergencyDetector,
+    HttpEntityExtractor,
+    HttpMiscommunicationChecker,
+    HttpRiskScorer,
+)
+from app.clinical_nlp.provider import EmergencyDetector, EntityExtractor, MiscommunicationChecker, RiskScorer
 
 
 @lru_cache(maxsize=1)
@@ -23,3 +28,15 @@ def get_miscommunication_checker() -> MiscommunicationChecker:
 def get_entity_extractor() -> EntityExtractor:
     base_url = os.environ.get("CLINICAL_NLP_URL", "http://localhost:8002")
     return HttpEntityExtractor(base_url=base_url)
+
+
+@lru_cache(maxsize=1)
+def get_emergency_detector() -> EmergencyDetector:
+    base_url = os.environ.get("CLINICAL_NLP_URL", "http://localhost:8002")
+    return HttpEmergencyDetector(base_url=base_url)
+
+
+@lru_cache(maxsize=1)
+def get_risk_scorer() -> RiskScorer:
+    base_url = os.environ.get("CLINICAL_NLP_URL", "http://localhost:8002")
+    return HttpRiskScorer(base_url=base_url)

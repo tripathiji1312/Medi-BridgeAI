@@ -20,10 +20,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.asr.provider import ASRProvider
 from app.asr.schemas import TranscriptEvent
 from app.asr.session import StreamingASRSession
-from app.clinical_nlp.provider import EntityExtractor, MiscommunicationChecker
+from app.clinical_nlp.provider import EmergencyDetector, EntityExtractor, MiscommunicationChecker, RiskScorer
 from app.confidence.scoring import compute_confidence_v2, confidence_band
 from app.diarization.diarizer import SpeakerDiarizer
 from app.diarization.provider import SpeakerEmbeddingProvider
+from app.emotion.provider import EmotionClassifier
 from app.mt.provider import MTProvider
 from app.orchestrator_client import OrchestratorClient
 from app.tts.provider import TTSProvider
@@ -36,6 +37,9 @@ EmbeddingProviderGetter = Callable[[], SpeakerEmbeddingProvider]
 MiscommunicationCheckerGetter = Callable[[], MiscommunicationChecker]
 OrchestratorClientGetter = Callable[[], OrchestratorClient]
 EntityExtractorGetter = Callable[[], EntityExtractor]
+EmergencyDetectorGetter = Callable[[], EmergencyDetector]
+EmotionClassifierGetter = Callable[[], EmotionClassifier]
+RiskScorerGetter = Callable[[], RiskScorer]
 
 
 def create_transcribe_router(
@@ -46,6 +50,9 @@ def create_transcribe_router(
     get_miscommunication_checker: MiscommunicationCheckerGetter | None = None,
     get_orchestrator_client: OrchestratorClientGetter | None = None,
     get_entity_extractor: EntityExtractorGetter | None = None,
+    get_emergency_detector: EmergencyDetectorGetter | None = None,
+    get_emotion_classifier: EmotionClassifierGetter | None = None,
+    get_risk_scorer: RiskScorerGetter | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -99,6 +106,9 @@ def create_transcribe_router(
                         get_tts_provider,
                         get_miscommunication_checker,
                         get_entity_extractor,
+                        get_emergency_detector,
+                        get_emotion_classifier,
+                        get_risk_scorer,
                         session,
                         diarizer,
                         diarizer_error,
@@ -126,14 +136,31 @@ async def _enrich_final_event(
     get_tts_provider: TTSProviderGetter | None,
     get_miscommunication_checker: MiscommunicationCheckerGetter | None,
     get_entity_extractor: EntityExtractorGetter | None,
+    get_emergency_detector: EmergencyDetectorGetter | None,
+    get_emotion_classifier: EmotionClassifierGetter | None,
+    get_risk_scorer: RiskScorerGetter | None,
     session: StreamingASRSession,
     diarizer: SpeakerDiarizer | None,
     diarizer_error: str | None,
 ) -> TranscriptEvent:
-    """Runs MT, back-translation + miscommunication check + confidence v2,
-    TTS, diarization, then entity extraction on a finalized ASR event.
-    Partials are left alone -- translating/diarizing/extracting unstable
+    """Runs emergency detection, MT, back-translation + miscommunication
+    check + confidence v2, TTS, diarization, entity extraction, emotion
+    classification, then risk scoring on a finalized ASR event. Partials
+    are left alone -- translating/diarizing/extracting/scoring unstable
     text wastes compute and would flicker on screen.
+
+    Emergency detection runs FIRST, before translation or anything else
+    (Blueprint Section 3.2 step 10: "Emergency keyword hits short-circuit
+    the pipeline: alert is pushed immediately on keyword match, before
+    waiting on the full NLP pass, to minimize latency for critical
+    alerts") -- it's on the Hindi original, needs nothing else in this
+    chain to have run yet, and every stage after it independently degrades
+    without affecting it either way.
+
+    Emotion classification runs on this utterance's own audio (local, no
+    HTTP call) once diarization has already pulled it from the session
+    buffer. Risk scoring runs last among Phase 6 additions since it
+    composes the emergency result and the emotion signal computed above.
 
     Each stage's failure is independent and never drops what earlier stages
     already computed: the client always has at least the raw Hindi text +
@@ -142,12 +169,15 @@ async def _enrich_final_event(
     if event.type != "final" or event.segment is None or not event.segment.text.strip():
         return event
 
+    event = await _run_emergency_detection(event, get_emergency_detector)
     event = _run_translation(event, get_mt_provider)
     event = _run_back_translation(event, get_mt_provider)
     event = await _run_miscommunication_check(event, get_miscommunication_checker)
     event = _run_tts(event, get_tts_provider)
     event = _run_diarization(event, session, diarizer, diarizer_error)
     event = await _run_entity_extraction(event, get_entity_extractor)
+    event = _run_emotion_classification(event, session, get_emotion_classifier)
+    event = await _run_risk_scoring(event, get_risk_scorer)
     return event
 
 
@@ -257,6 +287,65 @@ async def _run_entity_extraction(
             event = event.model_copy(update={"translation_entities_error": str(exc)})
 
     return event
+
+
+async def _run_emergency_detection(
+    event: TranscriptEvent, get_emergency_detector: EmergencyDetectorGetter | None
+) -> TranscriptEvent:
+    """Runs first in the enrichment chain (see _enrich_final_event's
+    docstring) -- on the Hindi original, since that's available immediately
+    with nothing else needing to run first."""
+    if get_emergency_detector is None:
+        return event
+    segment = event.segment
+    assert segment is not None
+
+    try:
+        result = await get_emergency_detector().detect(segment.text, segment.language)
+        return event.model_copy(update={"emergency": result})
+    except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
+        logger.exception("emergency detection failed for utterance %s", event.utterance_id)
+        return event.model_copy(update={"emergency_error": str(exc)})
+
+
+def _run_emotion_classification(
+    event: TranscriptEvent, session: StreamingASRSession, get_emotion_classifier: EmotionClassifierGetter | None
+) -> TranscriptEvent:
+    if get_emotion_classifier is None:
+        return event
+
+    audio = session.get_utterance_audio(event.utterance_id)
+    if audio is None:
+        return event.model_copy(update={"emotion_error": "utterance audio unavailable for emotion classification"})
+
+    try:
+        assessment = get_emotion_classifier().classify(audio, session.sample_rate)
+        return event.model_copy(update={"emotion": assessment})
+    except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
+        logger.exception("emotion classification failed for utterance %s", event.utterance_id)
+        return event.model_copy(update={"emotion_error": str(exc)})
+
+
+async def _run_risk_scoring(event: TranscriptEvent, get_risk_scorer: RiskScorerGetter | None) -> TranscriptEvent:
+    """Composes the emergency result and emotion signal computed earlier in
+    this same chain -- runs last among Phase 6 additions so both inputs
+    exist by the time it's called."""
+    if get_risk_scorer is None:
+        return event
+    segment = event.segment
+    assert segment is not None
+
+    emotion_label = event.emotion.label if event.emotion else None
+    emotion_confidence = event.emotion.confidence if event.emotion else None
+
+    try:
+        assessment = await get_risk_scorer().score(
+            event.session_id, segment.text, segment.language, emotion_label, emotion_confidence
+        )
+        return event.model_copy(update={"risk": assessment})
+    except Exception as exc:  # noqa: BLE001 - same degrade-not-crash rule as above
+        logger.exception("risk scoring failed for utterance %s", event.utterance_id)
+        return event.model_copy(update={"risk_error": str(exc)})
 
 
 async def _record_utterance(

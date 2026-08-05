@@ -67,6 +67,20 @@ def test_removing_an_unknown_entry_returns_404() -> None:
     assert response.status_code == 404
 
 
+def test_dismissed_alert_add_then_appears_in_memory() -> None:
+    client = _client()
+    client.post("/sessions/s1/utterances", json={"original_text": "chest pain"})
+
+    response = client.post(
+        "/sessions/s1/dismissed-alerts", json={"reason": "false positive, benign chest pressure"}
+    )
+    assert response.status_code == 200
+    assert response.json()["reason"] == "false positive, benign chest pressure"
+
+    memory = client.get("/sessions/s1/memory").json()
+    assert len(memory["dismissed_alerts"]) == 1
+
+
 def test_clear_session_then_memory_is_gone() -> None:
     client = _client()
     client.post("/sessions/s1/utterances", json={"original_text": "x"})

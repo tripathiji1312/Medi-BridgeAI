@@ -12,6 +12,9 @@ from app.asr.fixture_provider import StaticASRProvider
 from app.asr.provider_factory import get_asr_provider
 from app.diarization.fixture_provider import StaticEmbeddingProvider
 from app.diarization.provider_factory import get_embedding_provider
+from app.emotion.fixture_provider import StaticEmotionClassifier
+from app.emotion.prosody_classifier import ProsodyEmotionClassifier
+from app.emotion.provider_factory import get_emotion_classifier
 from app.mt.fixture_provider import StaticMTProvider
 from app.mt.provider_factory import get_mt_provider
 from app.tts.fixture_provider import StaticTTSProvider
@@ -26,6 +29,7 @@ def _clear_factory_caches() -> None:
     get_mt_provider.cache_clear()
     get_tts_provider.cache_clear()
     get_embedding_provider.cache_clear()
+    get_emotion_classifier.cache_clear()
 
 
 def test_fixture_mode_selects_static_asr_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,6 +50,22 @@ def test_fixture_mode_selects_static_tts_provider(monkeypatch: pytest.MonkeyPatc
 def test_fixture_mode_selects_static_embedding_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MEDIBRIDGE_FIXTURE_MODE", "1")
     assert isinstance(get_embedding_provider(), StaticEmbeddingProvider)
+
+
+def test_fixture_mode_selects_static_emotion_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MEDIBRIDGE_FIXTURE_MODE", "1")
+    assert isinstance(get_emotion_classifier(), StaticEmotionClassifier)
+
+
+def test_fixture_mode_off_selects_the_real_prosody_emotion_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unlike ASR/MT/diarization, the real emotion classifier is lightweight
+    pure-numpy DSP (no heavy download), so -- with numpy installed in this
+    dev environment -- the non-fixture-mode branch succeeds rather than
+    raising, proving fixture mode isn't wrongly selected by default here
+    the way test_fixture_mode_off_by_default_attempts_the_real_provider
+    proves it for ASR (whose real deps genuinely aren't installed)."""
+    monkeypatch.delenv("MEDIBRIDGE_FIXTURE_MODE", raising=False)
+    assert isinstance(get_emotion_classifier(), ProsodyEmotionClassifier)
 
 
 def test_fixture_mode_off_by_default_attempts_the_real_provider(

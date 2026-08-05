@@ -1,0 +1,8 @@
+-r requirements.txt
+# Real emotion classifier deps -- unlike ASR/MT/diarization, this is
+# lightweight: pure numpy DSP (autocorrelation pitch tracking + RMS
+# energy), no torch/model weights. Kept as its own file for consistency
+# with the other per-capability requirements files, and because ordinary
+# fixture-mode dev/test installs don't need it (app.emotion.fixture_provider
+# needs nothing beyond requirements.txt).
+numpy>=1.26,<3.0

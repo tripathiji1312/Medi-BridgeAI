@@ -10,8 +10,10 @@ from fastapi import APIRouter, HTTPException
 
 from app.memory.schemas import (
     AddCaseMemoryEntryRequest,
+    AddDismissedAlertRequest,
     AppendUtteranceRequest,
     CaseMemoryEntry,
+    DismissedAlert,
     SessionMemory,
     Utterance,
 )
@@ -44,6 +46,10 @@ def create_memory_router(get_store: Callable[[], MemoryStore]) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"No session found: {session_id}") from exc
         except CaseMemoryEntryNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"No case-memory entry found: {entry_id}") from exc
+
+    @router.post("/sessions/{session_id}/dismissed-alerts", response_model=DismissedAlert)
+    def add_dismissed_alert(session_id: str, request: AddDismissedAlertRequest) -> DismissedAlert:
+        return get_store().add_dismissed_alert(session_id, request)
 
     @router.delete("/sessions/{session_id}", status_code=204)
     def clear_session(session_id: str) -> None:

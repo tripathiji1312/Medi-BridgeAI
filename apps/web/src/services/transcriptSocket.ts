@@ -50,6 +50,12 @@ export class TranscriptSocket {
           entities_error: null,
           translation_entities: null,
           translation_entities_error: null,
+          emergency: null,
+          emergency_error: null,
+          emotion: null,
+          emotion_error: null,
+          risk: null,
+          risk_error: null,
         });
       }
     };

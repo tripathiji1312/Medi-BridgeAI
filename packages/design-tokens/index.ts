@@ -88,6 +88,32 @@ export const entityCategoryColors: Record<ThemeMode, Record<string, string>> = {
   },
 };
 
+// Emotion indicator colors (Blueprint Section 2.2/2.4). Keys mirror
+// shared-types' EmotionCategory literals; not imported here for the same
+// framework/contract-agnostic reason as entityCategoryColors above.
+// Risk level (Low/Medium/High) deliberately reuses confidenceGreen/Yellow/Red
+// above rather than a separate token set -- same traffic-light semantics.
+export const emotionColors: Record<ThemeMode, Record<string, string>> = {
+  light: {
+    calm: "#1E8E3E",
+    neutral: "#4A5A70",
+    happy: "#1565C0",
+    anxious: "#B58500",
+    stressed: "#B5652E",
+    fearful: "#8E24AA",
+    angry: "#C62828",
+  },
+  dark: {
+    calm: "#4CBB6F",
+    neutral: "#9FB0C3",
+    happy: "#5B9BEA",
+    anxious: "#E0B23A",
+    stressed: "#E08A4D",
+    fearful: "#CE93D8",
+    angry: "#E5645A",
+  },
+};
+
 export const spacingTokens = {
   xs: "4px",
   sm: "8px",

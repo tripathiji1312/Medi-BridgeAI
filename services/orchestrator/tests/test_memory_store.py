@@ -1,6 +1,6 @@
 import pytest
 
-from app.memory.schemas import AddCaseMemoryEntryRequest, AppendUtteranceRequest
+from app.memory.schemas import AddCaseMemoryEntryRequest, AddDismissedAlertRequest, AppendUtteranceRequest
 from app.memory.store import CaseMemoryEntryNotFoundError, MemoryStore, SessionNotFoundError
 
 
@@ -65,6 +65,31 @@ def test_removing_an_unknown_case_memory_entry_raises_rather_than_silently_no_op
 
     with pytest.raises(CaseMemoryEntryNotFoundError):
         store.remove_case_memory_entry("s1", "does-not-exist")
+
+
+def test_dismissed_alerts_can_be_added_and_carry_a_reason_and_source() -> None:
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="chest pain"))
+    utterance_id = store.get_memory("s1").utterances[0].id
+
+    entry = store.add_dismissed_alert(
+        "s1", AddDismissedAlertRequest(reason="Patient clarified: no chest pain, mistranslation", source_utterance_id=utterance_id)
+    )
+
+    assert entry.reason == "Patient clarified: no chest pain, mistranslation"
+    assert entry.source_utterance_id == utterance_id
+    assert store.get_memory("s1").dismissed_alerts == [entry]
+
+
+def test_dismissed_alerts_are_isolated_per_session() -> None:
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="x"))
+    store.append_utterance("s2", AppendUtteranceRequest(original_text="y"))
+
+    store.add_dismissed_alert("s1", AddDismissedAlertRequest(reason="false positive"))
+
+    assert len(store.get_memory("s1").dismissed_alerts) == 1
+    assert len(store.get_memory("s2").dismissed_alerts) == 0
 
 
 def test_clear_session_removes_all_memory_for_that_session_only() -> None:

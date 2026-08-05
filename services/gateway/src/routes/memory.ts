@@ -6,6 +6,11 @@
  * (speech-pipeline/clinical-nlp -> orchestrator directly), never through a
  * browser-initiated request, so there's no gateway route for those.
  *
+ * Dismissed-alerts is the one browser-initiated write here (Blueprint
+ * Section 2.2: dismissing an emergency alert is an explicit clinician
+ * action requiring a typed reason) -- unlike case-memory, this genuinely
+ * originates in the browser, not another service.
+ *
  * Gateway boundary rule (AGENT_INSTRUCTIONS.md Section 2): routing only,
  * no reinterpretation of orchestrator's response body.
  */
@@ -28,6 +33,24 @@ export async function registerMemoryProxy(app: FastifyInstance, options: MemoryP
     } catch (err) {
       // Fail loud, not silent (Blueprint Section 1 Principle 3): the
       // client needs to know memory is unreachable, not see a blank panel.
+      return reply.status(503).send({
+        error: "orchestrator_unavailable",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post("/sessions/:sessionId/dismissed-alerts", async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    try {
+      const upstream = await fetch(`${base}/sessions/${encodeURIComponent(sessionId)}/dismissed-alerts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request.body),
+      });
+      const body = await upstream.json();
+      return reply.status(upstream.status).send(body);
+    } catch (err) {
       return reply.status(503).send({
         error: "orchestrator_unavailable",
         detail: err instanceof Error ? err.message : String(err),

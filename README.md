@@ -11,7 +11,7 @@ Start here:
 
 ## Status
 
-Phase 5 (Clinical NLP: NER, Symptom Extraction, Keyword Highlighting) complete — see
+Phase 6 (Risk Scoring, Emergency Detection, Emotion) complete — see
 `docs/PROGRESS.md` for the current session log and what's next.
 
 ## Repo layout

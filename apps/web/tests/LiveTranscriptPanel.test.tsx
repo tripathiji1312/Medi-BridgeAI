@@ -518,4 +518,160 @@ describe("LiveTranscriptPanel", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("shows a risk badge and emotion indicator with their reasons when present", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          segment: {
+            text: "mujhe bukhaar aur khaansi hai",
+            is_final: true,
+            confidence: 0.9,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+          emotion: {
+            label: "anxious",
+            confidence: 0.72,
+            reason: "Highly variable pitch with little pausing.",
+            disclaimer: "Estimated from voice tone, not verified.",
+          },
+          risk: {
+            level: "medium",
+            raw_level: "medium",
+            reason: "2 symptom(s) mentioned (fever, cough).",
+            emergency_triggered: false,
+            symptom_count: 2,
+            lexicon_version: "1.1.0",
+          },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Tone: Anxious \(72%\)/)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Medium risk")).toBeInTheDocument();
+    expect(screen.getByText(/2 symptom\(s\) mentioned/)).toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("shows a persistent emergency alert banner, plays an audible cue, and dismissing it (with a reason) logs the dismissal and hides the banner", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/dismissed-alerts")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ id: "d1", reason: "false alarm", source_utterance_id: "u1" }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ session_id: "s1", utterances: [], case_memory: [] }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          session_id: "s1",
+          segment: {
+            text: "chest pain",
+            is_final: true,
+            confidence: 0.9,
+            start_ms: 0,
+            end_ms: 900,
+            language: "en",
+          },
+          error: null,
+          latency_ms: 120,
+          emergency: {
+            alert: true,
+            matches: [],
+            reason: "Detected emergency keyword(s): chest pain.",
+            lexicon_version: "1.1.0",
+          },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alertdialog", { name: "Emergency alert" })).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Detected emergency keyword\(s\): chest pain\./)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/reason for dismissing/i), {
+      target: { value: "Patient clarified: mistranslation, no chest pain" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /dismiss alert/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog", { name: "Emergency alert" })).not.toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/sessions/s1/dismissed-alerts"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          reason: "Patient clarified: mistranslation, no chest pain",
+          source_utterance_id: "u1",
+        }),
+      }),
+    );
+
+    vi.unstubAllGlobals();
+  });
 });

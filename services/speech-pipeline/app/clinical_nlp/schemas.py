@@ -36,3 +36,32 @@ class MedicalEntity(BaseModel):
     start_char: int = Field(ge=0)
     end_char: int = Field(ge=0)
     is_fuzzy_match: bool
+
+
+class EmergencyDetectionResult(BaseModel):
+    """Mirrors services/clinical-nlp/app/emergency_detector/schemas.py
+    EmergencyDetectionResponse."""
+
+    model_config = {"strict": True}
+
+    alert: bool
+    matches: list[MedicalEntity]
+    reason: str | None
+    lexicon_version: str
+
+
+RiskLevel = Literal["low", "medium", "high"]
+
+
+class RiskAssessment(BaseModel):
+    """Mirrors services/clinical-nlp/app/risk_scoring/schemas.py
+    RiskAssessment."""
+
+    model_config = {"strict": True}
+
+    level: RiskLevel
+    raw_level: RiskLevel
+    reason: str
+    emergency_triggered: bool
+    symptom_count: int
+    lexicon_version: str

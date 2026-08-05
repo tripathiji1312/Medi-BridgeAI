@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "terms": [
     {
       "canonical": "fever",
@@ -143,6 +143,51 @@
       "hindi": ["बेहोशी", "बेहोश"],
       "english": ["unconsciousness", "unconscious", "passed out"],
       "definition": "A state of being unresponsive to stimuli -- a medical emergency.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "severe bleeding",
+      "category": "symptom",
+      "icd10": "R58",
+      "hindi": ["बहुत खून बहना", "अत्यधिक रक्तस्राव", "तेज़ खून बहना"],
+      "english": ["severe bleeding", "heavy bleeding", "hemorrhage", "uncontrolled bleeding"],
+      "definition": "Blood loss that does not stop with basic first aid -- a medical emergency.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "facial drooping",
+      "category": "symptom",
+      "icd10": "R29.810",
+      "hindi": ["चेहरे का लटकना", "मुंह का एक तरफ टेढ़ा होना"],
+      "english": ["facial drooping", "face drooping", "drooping face", "face is drooping", "crooked smile"],
+      "definition": "One-sided weakness or sagging of the face -- the 'F' in the FAST stroke-warning criteria (Face, Arm, Speech, Time), a medical emergency.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "one-sided weakness",
+      "category": "symptom",
+      "icd10": "R29.810",
+      "hindi": ["एक तरफ की कमजोरी", "शरीर के एक हिस्से में कमजोरी", "एक हाथ में कमजोरी"],
+      "english": ["one-sided weakness", "arm weakness", "limb weakness", "numbness on one side"],
+      "definition": "Sudden weakness or numbness on one side of the body -- the 'A' in the FAST stroke-warning criteria, a medical emergency.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "slurred speech",
+      "category": "symptom",
+      "icd10": "R47.81",
+      "hindi": ["बोलने में लड़खड़ाहट", "अस्पष्ट बोली", "बोली में गड़बड़ी"],
+      "english": ["slurred speech", "speech is slurred", "speech difficulty", "difficulty speaking", "garbled speech"],
+      "definition": "Sudden difficulty speaking clearly -- the 'S' in the FAST stroke-warning criteria, a medical emergency.",
+      "is_emergency_keyword": true
+    },
+    {
+      "canonical": "stroke",
+      "category": "disease",
+      "icd10": "I63.9",
+      "hindi": ["स्ट्रोक", "लकवा", "फालिज"],
+      "english": ["stroke", "brain attack"],
+      "definition": "A sudden interruption of blood supply to the brain -- a medical emergency requiring immediate care.",
       "is_emergency_keyword": true
     },
     {

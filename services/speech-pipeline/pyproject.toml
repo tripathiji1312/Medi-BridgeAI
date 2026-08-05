@@ -1,13 +1,23 @@
 [tool.mypy]
 strict = true
-python_version = "3.11"
+# 3.12, not 3.11 like the other three services: numpy's own .pyi stubs (a
+# real dependency here since Phase 6's emotion classifier -- see
+# requirements-dev.txt) use PEP 695 `type` statement syntax, which mypy
+# refuses to parse in stub files when python_version < 3.12, independent of
+# what our own code uses. The project's actual minimum supported runtime
+# (README.md: "Python 3.11+") is unaffected -- this only controls what
+# syntax mypy assumes is available while type-checking, not what ships.
+python_version = "3.12"
 
-# faster_whisper/numpy live in requirements-asr.txt (optional, heavy --
-# see that file's comment), not requirements-dev.txt, so mypy can't see
-# their types in a base dev install. Real type-checking of
-# faster_whisper_provider.py happens when the ASR extras are installed.
+# faster_whisper lives in requirements-asr.txt (optional, heavy -- see that
+# file's comment), not requirements-dev.txt, so mypy can't see its types in
+# a base dev install. Real type-checking of faster_whisper_provider.py
+# happens when the ASR extras are installed. numpy is NOT in this override
+# (unlike the other three services' equivalent) -- it's a real
+# requirements-dev.txt dependency here (Phase 6), so its real stubs should
+# be checked, not silently treated as Any.
 [[tool.mypy.overrides]]
-module = ["faster_whisper", "faster_whisper.*", "numpy", "numpy.*"]
+module = ["faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
 
 # transformers/torch live in requirements-mt.txt (optional, heavy -- same

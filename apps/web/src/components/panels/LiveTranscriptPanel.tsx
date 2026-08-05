@@ -1,13 +1,18 @@
+import { useState } from "react";
 import { useLiveTranscript } from "../../hooks/useLiveTranscript";
 import { useSpeakerRoles } from "../../hooks/useSpeakerRoles";
+import { useDismissAlert } from "../../hooks/useDismissAlert";
 import { useTheme } from "../../theme/ThemeProvider";
 import { pcm16ToWavDataUrl } from "../../audio/wav";
 import { formatMsAsTimestamp } from "../../utils/time";
 import { WaveformMeter } from "../shared/WaveformMeter";
 import { SpeakerChip } from "../shared/SpeakerChip";
 import { ConfidenceBadge } from "../shared/ConfidenceBadge";
+import { RiskBadge } from "../shared/RiskBadge";
+import { EmotionIndicator } from "../shared/EmotionIndicator";
 import { HighlightedText } from "../shared/HighlightedText";
 import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
+import { EmergencyAlertCard } from "../alerts/EmergencyAlertCard";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
 import { GATEWAY_WS_URL } from "../../config";
@@ -22,6 +27,7 @@ export function LiveTranscriptPanel() {
     gatewayWsUrl: GATEWAY_WS_URL,
   });
   const { roleFor, assignRole } = useSpeakerRoles();
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
 
   const finals = events.filter((e) => e.type === "final" && e.segment);
   const latestPartial = [...events].reverse().find((e) => e.type === "partial" && e.segment);
@@ -31,6 +37,13 @@ export function LiveTranscriptPanel() {
     ...(e.entities ?? []),
     ...(e.translation_entities ?? []),
   ]);
+  const { dismiss: dismissAlert, error: dismissAlertError } = useDismissAlert(sessionId);
+  // Most recent utterance still carrying an un-dismissed emergency alert --
+  // one persistent banner (Blueprint Section 2.2: "persistent ... banner"),
+  // not one per matching utterance in the scrolling transcript.
+  const activeEmergencyEvent = [...finals]
+    .reverse()
+    .find((e) => e.emergency?.alert && !dismissedAlertIds.has(e.utterance_id));
 
   return (
     <section aria-label="Live transcript" style={{ color: colors.textPrimary }}>
@@ -48,6 +61,24 @@ export function LiveTranscriptPanel() {
       {error && (
         <p role="alert" style={{ color: colors.danger }}>
           {error}
+        </p>
+      )}
+
+      {activeEmergencyEvent?.emergency?.reason && (
+        <EmergencyAlertCard
+          key={activeEmergencyEvent.utterance_id}
+          utteranceId={activeEmergencyEvent.utterance_id}
+          reason={activeEmergencyEvent.emergency.reason}
+          onDismiss={async (reason) => {
+            const logged = await dismissAlert(reason, activeEmergencyEvent.utterance_id);
+            setDismissedAlertIds((prev) => new Set(prev).add(activeEmergencyEvent.utterance_id));
+            return logged;
+          }}
+        />
+      )}
+      {dismissAlertError && (
+        <p role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+          {dismissAlertError}
         </p>
       )}
 
@@ -75,7 +106,31 @@ export function LiveTranscriptPanel() {
               {event.confidence_v2 !== null && event.confidence_band !== null && (
                 <ConfidenceBadge score={event.confidence_v2} band={event.confidence_band} />
               )}
+              {event.emotion && (
+                <EmotionIndicator
+                  label={event.emotion.label}
+                  confidence={event.emotion.confidence}
+                  reason={event.emotion.reason}
+                  disclaimer={event.emotion.disclaimer}
+                />
+              )}
             </div>
+            {event.emotion_error && (
+              <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+                Tone assessment unavailable: {event.emotion_error}
+              </div>
+            )}
+            {event.risk && <RiskBadge level={event.risk.level} reason={event.risk.reason} />}
+            {event.risk_error && (
+              <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+                Risk assessment unavailable: {event.risk_error}
+              </div>
+            )}
+            {event.emergency_error && (
+              <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
+                Emergency keyword check unavailable: {event.emergency_error}
+              </div>
+            )}
 
             <div>
               {event.segment && <HighlightedText text={event.segment.text} entities={event.entities} />}
