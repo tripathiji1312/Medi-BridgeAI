@@ -1,75 +1,75 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConversationMemoryPanel } from "../src/components/panels/ConversationMemoryPanel";
 import { ThemeProvider } from "../src/theme/ThemeProvider";
+import type { SessionMemory } from "../src/hooks/useConversationMemory";
+
+const SAMPLE_MEMORY: SessionMemory = {
+  session_id: "s1",
+  utterances: [{ id: "u1", speaker: null, original_text: "x", translated_text: null, sequence: 0 }],
+  case_memory: [{ id: "c1", category: "symptom", value: "fever", source_utterance_id: "u1" }],
+  dismissed_alerts: [],
+  timeline: [],
+  draft_summary: null,
+  summary_approved: false,
+};
 
 describe("ConversationMemoryPanel", () => {
   it("shows a not-tracking message when there is no session", () => {
     render(
       <ThemeProvider>
-        <ConversationMemoryPanel sessionId={null} refreshTrigger={0} />
+        <ConversationMemoryPanel sessionId={null} memory={null} error={null} removeCaseMemoryEntry={vi.fn()} />
       </ThemeProvider>,
     );
     expect(screen.getByText(/not tracking/i)).toBeInTheDocument();
   });
 
-  it("renders case memory chips fetched for the active session", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () =>
-          Promise.resolve({
-            session_id: "s1",
-            utterances: [{ id: "u1", speaker: null, original_text: "x", translated_text: null, sequence: 0 }],
-            case_memory: [{ id: "c1", category: "symptom", value: "fever", source_utterance_id: "u1" }],
-          }),
-      }),
-    );
-
+  it("renders case memory chips from the given memory", () => {
     render(
       <ThemeProvider>
-        <ConversationMemoryPanel sessionId="s1" refreshTrigger={0} />
+        <ConversationMemoryPanel
+          sessionId="s1"
+          memory={SAMPLE_MEMORY}
+          error={null}
+          removeCaseMemoryEntry={vi.fn()}
+        />
       </ThemeProvider>,
     );
 
-    await waitFor(() => expect(screen.getByText("fever")).toBeInTheDocument());
+    expect(screen.getByText("fever")).toBeInTheDocument();
     expect(screen.getByText(/tracking 1 utterance/i)).toBeInTheDocument();
-
-    vi.unstubAllGlobals();
   });
 
-  it("lets the clinician remove a case memory entry", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () =>
-        Promise.resolve({
-          session_id: "s1",
-          utterances: [],
-          case_memory: [{ id: "c1", category: "symptom", value: "fever", source_utterance_id: null }],
-        }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
+  it("lets the clinician remove a case memory entry", () => {
+    const removeCaseMemoryEntry = vi.fn();
     render(
       <ThemeProvider>
-        <ConversationMemoryPanel sessionId="s1" refreshTrigger={0} />
+        <ConversationMemoryPanel
+          sessionId="s1"
+          memory={SAMPLE_MEMORY}
+          error={null}
+          removeCaseMemoryEntry={removeCaseMemoryEntry}
+        />
       </ThemeProvider>,
     );
-
-    await waitFor(() => expect(screen.getByText("fever")).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText("Remove symptom fever from memory"));
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/sessions/s1/case-memory/c1"),
-        expect.objectContaining({ method: "DELETE" }),
-      );
-    });
+    expect(removeCaseMemoryEntry).toHaveBeenCalledWith("c1");
+  });
 
-    vi.unstubAllGlobals();
+  it("surfaces a fetch error rather than silently showing an empty panel", () => {
+    render(
+      <ThemeProvider>
+        <ConversationMemoryPanel
+          sessionId="s1"
+          memory={null}
+          error="Conversation memory unavailable (status 503)"
+          removeCaseMemoryEntry={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Conversation memory unavailable (status 503)");
   });
 });

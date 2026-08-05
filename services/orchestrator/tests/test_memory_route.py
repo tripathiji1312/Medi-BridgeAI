@@ -1,14 +1,40 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.memory.schemas import Utterance
 from app.memory.store import MemoryStore
 from app.routes.memory import create_memory_router
+from app.summary.schemas import StructuredSummary, SummaryBullet
 
 
-def _client() -> TestClient:
+class _StubSummarizer:
+    def __init__(self, should_fail: bool = False) -> None:
+        self.should_fail = should_fail
+        self.received_utterances: list[Utterance] | None = None
+
+    async def summarize(self, utterances: list[Utterance]) -> StructuredSummary:
+        self.received_utterances = utterances
+        if self.should_fail:
+            raise RuntimeError("clinical-nlp unavailable")
+        return StructuredSummary(
+            patient_info=None,
+            complaints=[SummaryBullet(text="fever", source_utterance_id="doesnt-matter")],
+            symptoms=[],
+            objective=[],
+            diagnoses_mentioned=[],
+            medications=[],
+            recommendations=[],
+            action_items=[],
+            follow_up=[],
+            discarded_ungrounded_count=0,
+            model_name="stub",
+        )
+
+
+def _client(summarizer: _StubSummarizer | None = None) -> TestClient:
     store = MemoryStore()
     app = FastAPI()
-    app.include_router(create_memory_router(lambda: store))
+    app.include_router(create_memory_router(lambda: store, (lambda: summarizer) if summarizer else None))
     return TestClient(app)
 
 
@@ -79,6 +105,72 @@ def test_dismissed_alert_add_then_appears_in_memory() -> None:
 
     memory = client.get("/sessions/s1/memory").json()
     assert len(memory["dismissed_alerts"]) == 1
+
+
+def test_timeline_event_add_then_appears_in_memory() -> None:
+    client = _client()
+    client.post("/sessions/s1/utterances", json={"original_text": "fever"})
+
+    response = client.post(
+        "/sessions/s1/timeline-events",
+        json={"type": "symptom_mentioned", "description": "fever mentioned"},
+    )
+    assert response.status_code == 200
+    assert response.json()["type"] == "symptom_mentioned"
+
+    memory = client.get("/sessions/s1/memory").json()
+    assert len(memory["timeline"]) == 1
+
+
+def test_generate_summary_returns_and_stores_a_draft() -> None:
+    client = _client(_StubSummarizer())
+    client.post("/sessions/s1/utterances", json={"original_text": "fever"})
+
+    response = client.post("/sessions/s1/summary/generate")
+
+    assert response.status_code == 200
+    assert response.json()["model_name"] == "stub"
+    memory = client.get("/sessions/s1/memory").json()
+    assert memory["draft_summary"]["model_name"] == "stub"
+    assert memory["summary_approved"] is False
+
+
+def test_generate_summary_without_a_configured_summarizer_returns_503() -> None:
+    client = _client(None)
+
+    response = client.post("/sessions/s1/summary/generate")
+
+    assert response.status_code == 503
+
+
+def test_generate_summary_failure_returns_503_not_a_silent_empty_summary() -> None:
+    client = _client(_StubSummarizer(should_fail=True))
+
+    response = client.post("/sessions/s1/summary/generate")
+
+    assert response.status_code == 503
+    assert "unavailable" in response.json()["detail"]
+
+
+def test_approve_summary_without_a_draft_returns_409() -> None:
+    client = _client()
+    client.post("/sessions/s1/utterances", json={"original_text": "x"})
+
+    response = client.post("/sessions/s1/summary/approve")
+
+    assert response.status_code == 409
+
+
+def test_approve_summary_after_generating_succeeds() -> None:
+    client = _client(_StubSummarizer())
+    client.post("/sessions/s1/utterances", json={"original_text": "fever"})
+    client.post("/sessions/s1/summary/generate")
+
+    response = client.post("/sessions/s1/summary/approve")
+
+    assert response.status_code == 204
+    memory = client.get("/sessions/s1/memory").json()
+    assert memory["summary_approved"] is True
 
 
 def test_clear_session_then_memory_is_gone() -> None:

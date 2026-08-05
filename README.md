@@ -11,7 +11,7 @@ Start here:
 
 ## Status
 
-Phase 6 (Risk Scoring, Emergency Detection, Emotion) complete — see
+Phase 7 (Summary, Timeline, Analytics) complete — see
 `docs/PROGRESS.md` for the current session log and what's next.
 
 ## Repo layout

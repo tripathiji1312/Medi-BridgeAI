@@ -1,0 +1,8 @@
+-r requirements.txt
+# Real summarizer deps -- used only via OpenRouter's OpenAI-compatible
+# endpoint (see app/summarization/openrouter_provider.py's docstring for
+# why OpenRouter instead of a direct Anthropic SDK call). Kept separate
+# from requirements-dev.txt for the same reason as every other real-model
+# requirements file: ordinary dev/test installs use StaticSummarizer/
+# FixtureSummarizer and never make a network call.
+openai>=1.0,<3.0

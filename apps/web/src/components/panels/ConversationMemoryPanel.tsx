@@ -1,9 +1,11 @@
-import { useConversationMemory } from "../../hooks/useConversationMemory";
+import type { SessionMemory } from "../../hooks/useConversationMemory";
 import { useTheme } from "../../theme/ThemeProvider";
 
 export interface ConversationMemoryPanelProps {
   sessionId: string | null;
-  refreshTrigger: number;
+  memory: SessionMemory | null;
+  error: string | null;
+  removeCaseMemoryEntry: (entryId: string) => void | Promise<void>;
 }
 
 /** "Conversation Memory Status" panel (Blueprint Section 2.4): what
@@ -11,10 +13,13 @@ export interface ConversationMemoryPanelProps {
  * can remove. Case-memory entries are populated by Phase 5's symptom/
  * medication/allergy extraction -- this panel and its remove action work
  * today, but the chip list will be empty until that phase wires
- * extraction into orchestrator's case-memory API. */
-export function ConversationMemoryPanel({ sessionId, refreshTrigger }: ConversationMemoryPanelProps) {
+ * extraction into orchestrator's case-memory API.
+ *
+ * Purely presentational -- data comes from LiveTranscriptPanel's single
+ * useConversationMemory() call, shared with SummaryPanel/TimelineView so
+ * the same session-memory fetch isn't triggered three times over. */
+export function ConversationMemoryPanel({ sessionId, memory, error, removeCaseMemoryEntry }: ConversationMemoryPanelProps) {
   const { colors } = useTheme();
-  const { memory, error, removeCaseMemoryEntry } = useConversationMemory(sessionId, refreshTrigger);
 
   if (!sessionId) {
     return (

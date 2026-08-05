@@ -95,7 +95,7 @@ services:
         SERVICE_PORT: 8002
         # Real similarity model for the miscommunication detector -- see
         # Dockerfile.python-service's comment on REQUIREMENTS_FILE.
-        REQUIREMENTS_FILE: requirements-similarity.txt
+        REQUIREMENTS_FILE: requirements-full.txt
     ports:
       - "8002:8002"
     depends_on:

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLiveTranscript } from "../../hooks/useLiveTranscript";
 import { useSpeakerRoles } from "../../hooks/useSpeakerRoles";
 import { useDismissAlert } from "../../hooks/useDismissAlert";
+import { useConversationMemory } from "../../hooks/useConversationMemory";
 import { useTheme } from "../../theme/ThemeProvider";
 import { pcm16ToWavDataUrl } from "../../audio/wav";
 import { formatMsAsTimestamp } from "../../utils/time";
@@ -15,6 +16,9 @@ import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
 import { EmergencyAlertCard } from "../alerts/EmergencyAlertCard";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
+import { SummaryPanel } from "./SummaryPanel";
+import { TimelineView } from "./TimelineView";
+import { AnalyticsDashboard } from "./AnalyticsDashboard";
 import { GATEWAY_WS_URL } from "../../config";
 import type { MedicalEntity } from "@medibridge/shared-types";
 
@@ -38,6 +42,15 @@ export function LiveTranscriptPanel() {
     ...(e.translation_entities ?? []),
   ]);
   const { dismiss: dismissAlert, error: dismissAlertError } = useDismissAlert(sessionId);
+  const {
+    memory,
+    error: memoryError,
+    removeCaseMemoryEntry,
+    generateSummary,
+    approveSummary,
+    summaryError,
+    isGeneratingSummary,
+  } = useConversationMemory(sessionId, finals.length);
   // Most recent utterance still carrying an un-dismissed emergency alert --
   // one persistent banner (Blueprint Section 2.2: "persistent ... banner"),
   // not one per matching utterance in the scrolling transcript.
@@ -181,7 +194,26 @@ export function LiveTranscriptPanel() {
 
       <MedicalEntitiesPanel entities={allEntities} />
 
-      <ConversationMemoryPanel sessionId={sessionId} refreshTrigger={finals.length} />
+      <AnalyticsDashboard finals={finals} />
+
+      <ConversationMemoryPanel
+        sessionId={sessionId}
+        memory={memory}
+        error={memoryError}
+        removeCaseMemoryEntry={removeCaseMemoryEntry}
+      />
+
+      <SummaryPanel
+        sessionId={sessionId}
+        summary={memory?.draft_summary ?? null}
+        approved={memory?.summary_approved ?? false}
+        error={summaryError}
+        isGenerating={isGeneratingSummary}
+        onGenerate={() => void generateSummary()}
+        onApprove={() => void approveSummary()}
+      />
+
+      <TimelineView sessionId={sessionId} events={memory?.timeline ?? []} />
     </section>
   );
 }

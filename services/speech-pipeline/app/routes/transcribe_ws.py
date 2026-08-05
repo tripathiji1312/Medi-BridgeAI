@@ -21,12 +21,13 @@ from app.asr.provider import ASRProvider
 from app.asr.schemas import TranscriptEvent
 from app.asr.session import StreamingASRSession
 from app.clinical_nlp.provider import EmergencyDetector, EntityExtractor, MiscommunicationChecker, RiskScorer
+from app.clinical_nlp.schemas import RiskLevel
 from app.confidence.scoring import compute_confidence_v2, confidence_band
 from app.diarization.diarizer import SpeakerDiarizer
 from app.diarization.provider import SpeakerEmbeddingProvider
 from app.emotion.provider import EmotionClassifier
 from app.mt.provider import MTProvider
-from app.orchestrator_client import OrchestratorClient
+from app.orchestrator_client import OrchestratorClient, TimelineEventType
 from app.tts.provider import TTSProvider
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ def create_transcribe_router(
                 logger.exception("diarization unavailable for this session")
                 diarizer_error = str(exc)
 
+        last_risk_level: RiskLevel | None = None
         try:
             while True:
                 chunk = await websocket.receive_bytes()
@@ -115,6 +117,9 @@ def create_transcribe_router(
                     )
                     await websocket.send_json(event.model_dump())
                     await _record_utterance(event, session_id, get_orchestrator_client)
+                    last_risk_level = await _record_timeline_events(
+                        event, session_id, get_orchestrator_client, last_risk_level
+                    )
         except WebSocketDisconnect:
             for event in session.flush():
                 # Nothing to send to a disconnected client; this exercises
@@ -372,6 +377,63 @@ async def _record_utterance(
         await get_orchestrator_client().post_utterance(session_id, speaker, event.segment.text, translated_text)
     except Exception:  # noqa: BLE001 - best-effort side effect, must never crash the session
         logger.exception("failed to record utterance %s in orchestrator", event.utterance_id)
+
+
+async def _post_timeline_event_safe(
+    client: OrchestratorClient,
+    session_id: str,
+    event_type: TimelineEventType,
+    description: str,
+    source_utterance_id: str | None,
+) -> None:
+    try:
+        await client.post_timeline_event(session_id, event_type, description, source_utterance_id)
+    except Exception:  # noqa: BLE001 - best-effort side effect, must never crash the session
+        logger.exception("failed to record timeline event (%s) in orchestrator", event_type)
+
+
+async def _record_timeline_events(
+    event: TranscriptEvent,
+    session_id: str,
+    get_orchestrator_client: OrchestratorClientGetter | None,
+    last_risk_level: RiskLevel | None,
+) -> RiskLevel | None:
+    """Best-effort, same non-blocking rationale as _record_utterance --
+    posts Blueprint Section 2.2's four timeline event types as they're
+    observed on this already-enriched final event (symptom/medication
+    mentions from entity extraction, emergency alerts, and risk-level
+    changes tracked across this connection's utterances). "Alert dismissed"
+    isn't posted from here -- it's a clinician UI action orchestrator
+    records directly when the dismissal itself is submitted, not something
+    speech-pipeline observes."""
+    if get_orchestrator_client is None or event.type != "final" or event.segment is None:
+        return last_risk_level
+
+    client = get_orchestrator_client()
+
+    for entity in (*(event.entities or []), *(event.translation_entities or [])):
+        if entity.category == "symptom":
+            await _post_timeline_event_safe(
+                client, session_id, "symptom_mentioned", f"{entity.canonical_name} mentioned", event.utterance_id
+            )
+        elif entity.category == "medication":
+            await _post_timeline_event_safe(
+                client, session_id, "medication_mentioned", f"{entity.canonical_name} mentioned", event.utterance_id
+            )
+
+    if event.emergency is not None and event.emergency.alert and event.emergency.reason:
+        await _post_timeline_event_safe(
+            client, session_id, "alert_triggered", event.emergency.reason, event.utterance_id
+        )
+
+    new_level = event.risk.level if event.risk else None
+    if new_level is not None and new_level != last_risk_level:
+        await _post_timeline_event_safe(
+            client, session_id, "risk_level_changed", f"Risk level changed to {new_level}", event.utterance_id
+        )
+        last_risk_level = new_level
+
+    return last_risk_level
 
 
 def _run_diarization(

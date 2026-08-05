@@ -4,6 +4,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.summary.schemas import StructuredSummary
+from app.timeline.schemas import TimelineEvent
+
 CaseMemoryCategory = Literal["symptom", "medication", "allergy"]
 
 
@@ -87,3 +90,12 @@ class SessionMemory(BaseModel):
     utterances: list[Utterance]
     case_memory: list[CaseMemoryEntry]
     dismissed_alerts: list[DismissedAlert]
+    # Phase 7 additions.
+    timeline: list[TimelineEvent]
+    # draft_summary is regenerated (not appended to) each time -- a new
+    # generation always supersedes a prior draft, and always resets
+    # summary_approved to False. A stale approval silently carrying over
+    # onto regenerated content would violate Blueprint Section 2.4's "never
+    # auto-finalized" rule in spirit even if not literally auto-finalizing.
+    draft_summary: StructuredSummary | None
+    summary_approved: bool

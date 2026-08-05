@@ -1,0 +1,6 @@
+# Combined requirements for running clinical-nlp with all real (non-fixture)
+# providers -- used by the Docker image, same rationale as
+# speech-pipeline/requirements-full.txt. Each of these already pulls in
+# requirements.txt, so this is just their union.
+-r requirements-similarity.txt
+-r requirements-summarization.txt

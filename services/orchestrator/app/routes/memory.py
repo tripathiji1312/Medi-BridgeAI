@@ -17,10 +17,21 @@ from app.memory.schemas import (
     SessionMemory,
     Utterance,
 )
-from app.memory.store import CaseMemoryEntryNotFoundError, MemoryStore, SessionNotFoundError
+from app.memory.store import (
+    CaseMemoryEntryNotFoundError,
+    MemoryStore,
+    NoDraftSummaryError,
+    SessionNotFoundError,
+)
+from app.summary.client import ClinicalNlpSummarizer
+from app.summary.schemas import StructuredSummary
+from app.timeline.schemas import AddTimelineEventRequest, TimelineEvent
 
 
-def create_memory_router(get_store: Callable[[], MemoryStore]) -> APIRouter:
+def create_memory_router(
+    get_store: Callable[[], MemoryStore],
+    get_summarizer: Callable[[], ClinicalNlpSummarizer] | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.post("/sessions/{session_id}/utterances", response_model=Utterance)
@@ -50,6 +61,31 @@ def create_memory_router(get_store: Callable[[], MemoryStore]) -> APIRouter:
     @router.post("/sessions/{session_id}/dismissed-alerts", response_model=DismissedAlert)
     def add_dismissed_alert(session_id: str, request: AddDismissedAlertRequest) -> DismissedAlert:
         return get_store().add_dismissed_alert(session_id, request)
+
+    @router.post("/sessions/{session_id}/timeline-events", response_model=TimelineEvent)
+    def add_timeline_event(session_id: str, request: AddTimelineEventRequest) -> TimelineEvent:
+        return get_store().add_timeline_event(session_id, request)
+
+    @router.post("/sessions/{session_id}/summary/generate", response_model=StructuredSummary)
+    async def generate_summary(session_id: str) -> StructuredSummary:
+        if get_summarizer is None:
+            raise HTTPException(status_code=503, detail="Summarizer is not configured")
+        try:
+            return await get_store().generate_summary(session_id, get_summarizer())
+        except RuntimeError as exc:
+            # clinical-nlp unreachable or the LLM call itself failed --
+            # fail loud (Blueprint Section 1 Principle 3), never silently
+            # return an empty/stale summary.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.post("/sessions/{session_id}/summary/approve", status_code=204)
+    def approve_summary(session_id: str) -> None:
+        try:
+            get_store().approve_summary(session_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"No session found: {session_id}") from exc
+        except NoDraftSummaryError as exc:
+            raise HTTPException(status_code=409, detail="No draft summary to approve -- generate one first") from exc
 
     @router.delete("/sessions/{session_id}", status_code=204)
     def clear_session(session_id: str) -> None:

@@ -15,16 +15,33 @@ concrete type.
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
+# Mirrors services/orchestrator/app/timeline/schemas.py TimelineEventType.
+TimelineEventType = Literal[
+    "symptom_mentioned",
+    "medication_mentioned",
+    "alert_triggered",
+    "alert_dismissed",
+    "risk_level_changed",
+]
+
 
 class OrchestratorClient(Protocol):
     async def post_utterance(
         self, session_id: str, speaker: str | None, original_text: str, translated_text: str | None
+    ) -> None: ...
+
+    async def post_timeline_event(
+        self,
+        session_id: str,
+        event_type: TimelineEventType,
+        description: str,
+        source_utterance_id: str | None,
     ) -> None: ...
 
 
@@ -49,3 +66,24 @@ class HttpOrchestratorClient(OrchestratorClient):
                 response.raise_for_status()
             except httpx.HTTPError:
                 logger.exception("failed to record utterance in orchestrator (session=%s)", session_id)
+
+    async def post_timeline_event(
+        self,
+        session_id: str,
+        event_type: TimelineEventType,
+        description: str,
+        source_utterance_id: str | None,
+    ) -> None:
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            try:
+                response = await client.post(
+                    f"{self._base_url}/sessions/{session_id}/timeline-events",
+                    json={
+                        "type": event_type,
+                        "description": description,
+                        "source_utterance_id": source_utterance_id,
+                    },
+                )
+                response.raise_for_status()
+            except httpx.HTTPError:
+                logger.exception("failed to record timeline event in orchestrator (session=%s)", session_id)

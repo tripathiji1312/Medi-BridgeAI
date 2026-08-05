@@ -5,24 +5,31 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 6 — Risk Scoring, Emergency Detection, Emotion — done
-- **Last completed task:** clinical-nlp now runs a fast, deterministic emergency
-  keyword/phrase detector (`POST /emergency/detect`, FAST stroke criteria + severe
-  bleeding added to the lexicon) and a Low/Medium/High risk scorer with per-session
-  hysteresis (`POST /risk/score`, escalation/de-escalation both require 2 consecutive
-  turns except a real emergency match, which forces High immediately). speech-pipeline
-  now classifies emotion from each utterance's own audio using real acoustic feature
-  extraction (autocorrelation pitch tracking + RMS energy, pure numpy DSP -- no
-  pretrained model) through a deterministic, documented threshold classifier, and runs
-  emergency detection first in its enrichment chain (before translation/anything
-  else) to minimize alert latency. apps/web shows a persistent, dismiss-with-reason
-  emergency banner (audible cue, dismissal logged to a new orchestrator endpoint for
-  audit), a risk badge, and a tone indicator with its disclaimer -- all with real E2E
-  coverage against real running services in fixture mode.
+- **Current phase:** Phase 7 — Summary, Timeline, Analytics — done
+- **Last completed task:** clinical-nlp now runs a real LLM-backed structured
+  consultation summarizer (`POST /summarize`, Claude Sonnet via OpenRouter -- a
+  documented deviation from Blueprint Section 4's "direct Anthropic API" wording,
+  same model, different working gateway) with mandatory grounding validation (every
+  bullet's cited utterance id must be real; a lexical-overlap backstop catches
+  citations to the wrong utterance) and ungrounded items transparently discarded, not
+  hidden. orchestrator now owns the draft-summary lifecycle (`POST
+  .../summary/generate`, always resets approval on regeneration; `POST
+  .../summary/approve`, 409 without a draft -- "never auto-finalized") and a
+  chronological timeline event store (`POST .../timeline-events`, four event types
+  per Blueprint Section 2.2, real wall-clock timestamps). speech-pipeline posts
+  symptom/medication-mention, emergency-alert, and risk-level-change timeline events
+  best-effort after delivering each event. apps/web adds `SummaryPanel` (DRAFT/
+  APPROVED gate, per-section grounded bullets, discarded-count shown), `TimelineView`
+  (chronological list + JSON export), and `AnalyticsDashboard` (consultation time,
+  speaking ratio, symptom count, avg confidence, emotion trend, ASR self-confidence
+  as the honest stand-in for "accuracy stats" -- all computed client-side from data
+  already in memory, no new backend storage needed). Verified with the real OpenRouter
+  API (not just fixture mode) end-to-end: orchestrator -> clinical-nlp -> Claude
+  Sonnet -> grounded structured JSON, zero discarded, correct citations.
 - **Known issues / deferred items:** see "Deferred" under each session entry below.
-- **Next recommended task:** Phase 7 per Blueprint Section 8 (Summary, Timeline,
-  Analytics) — the structured case-memory store (Phase 4) and now the risk/emergency
-  signal stream (Phase 6) both feed naturally into a session summary and timeline.
+- **Next recommended task:** Phase 8 per Blueprint Section 8 (Vision/CV Module) --
+  consent flow, pose-based collapse/motionlessness/frame-exit detection, isolated
+  from the audio pipeline in `services/vision-service` (still an empty scaffold).
 
 ---
 
@@ -1248,6 +1255,227 @@ option would only work on half the transcript anyway.
   session-level analytics/timeline view** -- Blueprint Section 8 places "Summary,
   Timeline, Analytics" at Phase 7, not this phase; noted in the Status Snapshot
   above as the natural next task.
+
+---
+
+### Session 8 — 2026-08-05 — Phase 7: Summary, Timeline, Analytics
+
+**Security incident during this session, resolved, worth recording:** while setting
+up the LLM summarizer, the user pasted two real API keys (Anthropic, then
+OpenRouter) directly into the chat conversation, and once into `.env.example`
+itself -- a file that's tracked in git and meant to be committed as a template.
+`.env.example` was caught and fixed before any commit happened (verified via `git
+diff` showing no tracked change survived); both keys were treated as compromised by
+policy regardless (a credential pasted into a chat is exposure independent of
+whether it reaches git), used only from a local, gitignored `.env` for this
+session's testing, and the user was advised to rotate both in their respective
+consoles. No real key exists in any tracked file as of this commit -- confirmed by
+grep across the working tree and `git diff` on `.env.example` specifically.
+
+**Architecture decisions, made explicit rather than silently assumed:**
+
+1. **Summarization uses Claude Sonnet via OpenRouter, not a direct Anthropic API
+   call.** Blueprint Section 4's tech-stack table specifies "Claude via Anthropic
+   API" directly. The direct Anthropic key had no credit balance (verified: it
+   authenticates correctly, then a real call returns "Your credit balance is too
+   low"); the user's OpenRouter key does, and OpenRouter can route to the same
+   Claude models via an OpenAI-compatible API. Real-smoke-tested end-to-end before
+   committing to it (`app/summarization/openrouter_provider.py`'s docstring records
+   this): both a standalone call and, later, the full orchestrator -> clinical-nlp ->
+   OpenRouter -> Claude chain against real utterances, producing correctly grounded
+   output with zero discarded bullets. Kept behind the same `Summarizer` Protocol as
+   everything else, so a direct-Anthropic implementation is a drop-in swap later if
+   the account situation changes -- this is documented as a reasoned deviation, not
+   silently substituted.
+2. **Grounding validation is two-layered, not just "trust the LLM's citation."**
+   Blueprint Section 11.1: "If an LLM-based extractor cannot produce a valid span
+   match, the item is discarded, not shown." Layer one (strictly enforced): the
+   cited `source_utterance_id` must be one of the ids actually sent to the model --
+   a hallucinated or malformed id is an automatic discard. Layer two (a documented
+   heuristic backstop, not a strong guarantee): a `difflib` lexical-overlap check
+   against the cited utterance's own text, catching the case where a bullet cites a
+   *real* utterance id but writes content that actually belongs to a different one.
+   Real semantic-grounding verification would need an embedding-similarity call,
+   which is out of scope here and said so directly rather than implied as solved.
+3. **Emergency detection's summarizer output also strips markdown code fences**
+   before JSON parsing -- the real OpenRouter/Claude call wrapped its JSON in
+   ` ```json ... ``` ` despite explicit instructions not to, discovered during the
+   first real smoke test, handled with a regex strip rather than assuming clean
+   output from any LLM call going forward.
+4. **Draft-summary lifecycle lives in orchestrator, not clinical-nlp.** clinical-nlp
+   generates a summary (stateless, given a transcript); orchestrator owns whether a
+   given generation is currently a draft or approved, because that's session state
+   (AGENT_INSTRUCTIONS.md Section 2), and because orchestrator calling clinical-nlp's
+   HTTP endpoint is orchestration -- its literal purpose (Blueprint Section 3.2 step
+   9: "Orchestration service merges all outputs") -- not the "direct ML inference"
+   the boundary table actually prohibits (running/hosting a model itself). This is
+   the same reasoning already applied to speech-pipeline calling clinical-nlp;
+   extended here to orchestrator calling clinical-nlp for the first time.
+5. **Regenerating a summary always resets `summary_approved` to `False`.** Blueprint
+   Section 2.4: "AI Consultation Summary (draft, clinician must review/approve
+   before export -- never auto-finalized)." A stale approval silently carrying over
+   onto regenerated content would violate that rule in spirit even without literally
+   auto-finalizing anything new -- so a fresh draft always supersedes a prior
+   approval, tested explicitly (`test_regenerating_a_summary_resets_approval`).
+6. **Timeline events are posted by whichever service actually observes them, not
+   inferred after the fact.** speech-pipeline (which already computes entities/
+   emergency/risk per utterance) posts symptom/medication-mention, alert-triggered,
+   and risk-level-changed events as a best-effort side effect, same non-blocking
+   pattern as utterance recording. "Alert dismissed" is the one event type
+   orchestrator appends itself, automatically, inside `add_dismissed_alert` --
+   because that action already goes through orchestrator directly (a clinician UI
+   action, not something speech-pipeline observes), so there's no reason to round-trip
+   it through another service.
+7. **Risk-level-changed events are deduplicated against the last known level for the
+   connection**, not posted on every utterance regardless of change -- tracked as a
+   plain local variable across the WebSocket connection's lifetime in
+   `transcribe_ws.py` (mirroring how diarizer state is scoped per-connection).
+   Verified with a dedicated test using an alternating-level stub scorer, distinct
+   from the constant-level stub used to prove no-change means no duplicate post.
+8. **Analytics Dashboard is computed entirely client-side**, from the same
+   `TranscriptEvent[]` array already held in memory for the live transcript -- no new
+   backend storage or endpoint. This was a deliberate simplicity choice: every metric
+   Blueprint Section 2.4 lists (consultation time, speaking ratio, symptom count, avg
+   confidence, emotion trend, accuracy stats) is already fully derivable from data the
+   frontend has. Two interpretation choices made explicit in `utils/analytics.ts`'s
+   docstrings rather than left implicit: "consultation time" is audio-domain duration
+   (earliest utterance start to latest utterance end), not wall-clock session length,
+   since that's the real signal available without inventing a separate session-start
+   timestamp; "accuracy stats" has no ground-truth transcript to measure real
+   accuracy against, so it's reported as the mean raw ASR self-confidence -- an
+   honest stand-in, labeled as such, not a fabricated accuracy number.
+9. **Timeline export is a plain client-side JSON download, not PDF/TXT.** Blueprint
+   Section 9 (Phase 9 -- Platform Hardening) explicitly lists "export (PDF/TXT/JSON)"
+   as its own scope item; building full multi-format export now would be scope creep
+   into a later phase. JSON download alone satisfies Section 2.2's "exportable"
+   requirement honestly without pretending the Phase 9 feature is already done.
+
+**What was built:**
+- `services/clinical-nlp/app/summarization/`: `schemas.py` (`SummaryUtterance`,
+  `SummaryBullet` with a mandatory `source_utterance_id`, `StructuredSummary` mapping
+  Blueprint Section 2.2's SOAP-like brief fields -- `diagnoses_mentioned`, not
+  `diagnoses`, deliberately named to mean "said aloud," never an AI-originated
+  diagnosis), `grounding.py` (the two-layer validation above), `openrouter_provider.py`
+  (`OpenRouterSummarizer`, real implementation), `fixture_provider.py`
+  (`FixtureSummarizer` digest-keyed, `StaticSummarizer` always cites the first given
+  utterance so E2E output stays both deterministic and structurally grounded),
+  `provider_factory.py`. Filled in the Phase-0-scaffolded placeholder package.
+  `requirements-summarization.txt` (`openai` SDK, used purely as an
+  OpenRouter-compatible HTTP client) + `requirements-full.txt` (new for this
+  service, unions similarity + summarization deps) + `docker-compose.dev.yml`'s
+  clinical-nlp `REQUIREMENTS_FILE` updated to point at it.
+- `services/orchestrator/app/summary/`: `schemas.py` (mirrors clinical-nlp's by
+  hand, same cross-service pattern as everywhere else), `client.py`
+  (`ClinicalNlpSummarizer` Protocol + `HttpClinicalNlpSummarizer`, 30s timeout --
+  longer than every other cross-service call in this build, since a real LLM call is
+  genuinely slower than the local-model calls elsewhere). `app/timeline/schemas.py`
+  (`TimelineEventType`, `TimelineEvent` with a server-set real ISO 8601 timestamp).
+  `app/memory/schemas.py` + `store.py` extended: `SessionMemory` gains `timeline`,
+  `draft_summary`, `summary_approved`; `MemoryStore` gains `add_timeline_event`,
+  `generate_summary` (async, resets approval), `approve_summary` (raises
+  `NoDraftSummaryError` without a draft). `httpx` added as a new base dependency
+  (orchestrator's first outbound HTTP call to another service).
+- `services/orchestrator/app/routes/memory.py`: `POST .../timeline-events`, `POST
+  .../summary/generate` (503 on failure, never a silent empty summary), `POST
+  .../summary/approve` (404 unknown session, 409 no draft).
+- `services/speech-pipeline/app/orchestrator_client.py`: extended
+  `OrchestratorClient` with `post_timeline_event`; `app/routes/transcribe_ws.py`
+  adds `_record_timeline_events` (symptom/medication mentions from already-computed
+  entities, emergency alerts, deduplicated risk-level changes), called after
+  `_record_utterance`, same best-effort non-blocking rule, own try/except per post so
+  one failure never blocks a sibling event.
+- `services/gateway/src/routes/memory.ts`: `POST .../summary/generate` and `POST
+  .../summary/approve` proxies (both genuinely browser-initiated, unlike
+  timeline-events which stay service-to-service and are only read back via the
+  existing `GET .../memory`).
+- `apps/web`: `useConversationMemory` extended with `timeline`/`draft_summary`/
+  `summary_approved` on its local `SessionMemory` type (following this file's
+  established convention of not mirroring REST-fetched shapes into
+  `packages/shared-types`, unlike the WebSocket `TranscriptEvent` contract) plus
+  `generateSummary()`/`approveSummary()` actions with their own error state,
+  separate from the memory-fetch error so a slow/failing LLM call never clobbers an
+  unrelated fetch error. `SummaryPanel`, `TimelineView`, `AnalyticsDashboard` (new
+  components) + `utils/analytics.ts` (pure, independently unit-tested computation).
+  **Refactored `ConversationMemoryPanel` from a self-fetching component to a
+  presentational one** taking `memory`/`error`/`removeCaseMemoryEntry` as props --
+  `useConversationMemory` is now called once in `LiveTranscriptPanel` and shared
+  across all three panels that need session-memory data, instead of three
+  independent fetches of the same data on every refresh trigger.
+
+**Tests (all genuinely run, not just written):**
+- clinical-nlp: 13 new tests (grounding -- valid/invalid id, lexical-backstop
+  rejection of a valid-id-wrong-content citation, malformed-candidate handling,
+  mixed valid/invalid lists; fixture/static summarizer; route incl. 503 on failure)
+  -- 77 total, all green.
+- orchestrator: 16 new tests (timeline event add + auto-append on dismissal; summary
+  generate/approve store methods incl. the no-draft/unknown-session/reset-on-
+  regenerate cases; route-level equivalents; a new `test_summary_client.py` mirroring
+  every other cross-service client's test shape) -- 32 total, all green.
+- speech-pipeline: 5 new tests (symptom/medication timeline posting, emergency-alert
+  timeline posting, constant-level-posts-once vs actually-changing-level-posts-twice,
+  posting-failure-does-not-crash) -- 92 total, all green.
+- gateway: 4 new tests (summary/generate and summary/approve proxies, success + 503
+  + 409-passthrough cases) -- 17 total, all green.
+- apps/web: 24 new tests (`SummaryPanel` incl. DRAFT/APPROVED states and the
+  discarded-count transparency; `TimelineView` incl. the JSON-export interaction;
+  `computeSessionAnalytics` -- 7 tests covering each metric in isolation;
+  `AnalyticsDashboard`; `ConversationMemoryPanel` rewritten for its new
+  presentational-props shape; 1 new `LiveTranscriptPanel` integration scenario
+  covering the full generate -> DRAFT -> approve -> APPROVED flow against a stateful
+  fetch mock) -- 107 total, all green.
+- E2E: 2 new specs (`apps/web/e2e/phase7.spec.ts`) against real running services in
+  `MEDIBRIDGE_FIXTURE_MODE` -- generate/approve flow (confirms `model_name:
+  "static-fixture"`, a real cross-service round trip through orchestrator and
+  clinical-nlp, not a mock) and the timeline/analytics dashboard picking up a real
+  symptom mention. **Found and fixed a real bug while writing these**:
+  `playwright.config.ts`'s orchestrator `webServer` entry never set
+  `CLINICAL_NLP_URL`, so it would have silently defaulted to port 8002 (this
+  service's normal dev port) while clinical-nlp actually runs on 8102 in E2E --
+  caught immediately by the summary-generate test failing. Also hit and fixed a
+  genuine test race (not a fixture race): the first summary-generate attempt raced
+  ahead of speech-pipeline's best-effort utterance recording, summarizing an empty
+  utterance list -- fixed by waiting for "Tracking N utterance" text (the same
+  pattern Phase 4's own E2E spec already established for this exact eventual-
+  consistency gap) instead of a blind timeout. Full suite: 16/16 E2E specs green.
+- **Real (non-fixture) cross-service verification, beyond E2E**: stood up a real
+  clinical-nlp instance (real `OPENROUTER_API_KEY`, no `MEDIBRIDGE_FIXTURE_MODE`) and
+  a real orchestrator pointed at it, posted three genuine bilingual utterances via
+  curl, and called `POST .../summary/generate` for real -- returned a correctly
+  structured, correctly grounded summary (`model_name: "anthropic/claude-sonnet-4.5"`,
+  `discarded_ungrounded_count: 0`, every bullet citing a real utterance id) and then
+  approved it successfully. This is the one thing this session's fixture-mode E2E
+  suite structurally cannot prove (it never exercises the real OpenRouter call), so
+  it was verified manually and is recorded here rather than left as an assumption.
+- Full regression: 201 Python (77+92+32) + 124 JS (107 web + 17 gateway) unit/
+  integration tests, 16/16 E2E specs, all green; mypy --strict/ruff/tsc/eslint all
+  clean across every touched service.
+
+**Deferred, explicitly:**
+- **The lexical-overlap grounding backstop is a heuristic, not a strong
+  guarantee** (see architecture decision 2 above) -- a bullet that cites a real
+  utterance id while still subtly misrepresenting its content isn't guaranteed to be
+  caught. Real semantic grounding would need an embedding-similarity call between
+  each bullet and its cited utterance; not built here, flagged as the honest next
+  step if this needs hardening.
+- **Timeline/summary generation thresholds and prompt wording are unvalidated
+  against a labeled gold set** -- same standing caveat as every other heuristic
+  introduced this build, flagged for `scripts/model-eval/` once it exists.
+- **Export is JSON-only** (see architecture decision 9) -- PDF/TXT formatting is
+  explicitly Blueprint Section 9 (Phase 9) scope, not built here.
+- **Case-memory is still not auto-populated from extracted entities** -- flagged in
+  Phase 4, again in Phase 6, still true here. The timeline now surfaces symptom/
+  medication *mentions* as events, which is adjacent but distinct from case-memory's
+  structured, clinician-confirmed chip list; auto-populating case-memory itself is
+  still a human-in-the-loop UI flow that hasn't been built.
+- **No dedicated UI to browse/replay dismissed-alert or historical timeline data
+  across sessions** -- both are session-scoped and only visible for the currently
+  active session, consistent with this build's "session state, not yet a persistent
+  history" scope; a real searchable-history feature is Blueprint Section 9's
+  "searchable history" line item.
+- **The Anthropic API key is still unused** (no credit balance) -- the codebase
+  supports swapping `OpenRouterSummarizer` for a direct-Anthropic implementation
+  behind the same `Summarizer` Protocol whenever that account has credit, without
+  touching any call site.
 
 ---
 

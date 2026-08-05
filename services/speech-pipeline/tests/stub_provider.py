@@ -117,6 +117,8 @@ class RecordingStubMiscommunicationChecker:
 class RecordingStubOrchestratorClient:
     calls: list[tuple[str, str | None, str, str | None]] = field(default_factory=list)
     should_fail: bool = False
+    timeline_calls: list[tuple[str, str, str, str | None]] = field(default_factory=list)
+    timeline_should_fail: bool = False
 
     async def post_utterance(
         self, session_id: str, speaker: str | None, original_text: str, translated_text: str | None
@@ -124,6 +126,17 @@ class RecordingStubOrchestratorClient:
         if self.should_fail:
             raise RuntimeError("orchestrator unavailable")
         self.calls.append((session_id, speaker, original_text, translated_text))
+
+    async def post_timeline_event(
+        self,
+        session_id: str,
+        event_type: str,
+        description: str,
+        source_utterance_id: str | None,
+    ) -> None:
+        if self.timeline_should_fail:
+            raise RuntimeError("orchestrator unavailable")
+        self.timeline_calls.append((session_id, event_type, description, source_utterance_id))
 
 
 @dataclass

@@ -1,7 +1,41 @@
+import asyncio
+
 import pytest
 
 from app.memory.schemas import AddCaseMemoryEntryRequest, AddDismissedAlertRequest, AppendUtteranceRequest
-from app.memory.store import CaseMemoryEntryNotFoundError, MemoryStore, SessionNotFoundError
+from app.memory.store import CaseMemoryEntryNotFoundError, MemoryStore, NoDraftSummaryError, SessionNotFoundError
+from app.summary.schemas import StructuredSummary, SummaryBullet
+from app.timeline.schemas import AddTimelineEventRequest
+
+
+class _StubSummarizer:
+    def __init__(self, summary: StructuredSummary | None = None, should_fail: bool = False) -> None:
+        self.summary = summary
+        self.should_fail = should_fail
+        self.calls = 0
+
+    async def summarize(self, utterances: object) -> StructuredSummary:
+        self.calls += 1
+        if self.should_fail:
+            raise RuntimeError("clinical-nlp unavailable")
+        assert self.summary is not None
+        return self.summary
+
+
+def _empty_summary(model_name: str = "stub") -> StructuredSummary:
+    return StructuredSummary(
+        patient_info=None,
+        complaints=[SummaryBullet(text="fever", source_utterance_id="u1")],
+        symptoms=[],
+        objective=[],
+        diagnoses_mentioned=[],
+        medications=[],
+        recommendations=[],
+        action_items=[],
+        follow_up=[],
+        discarded_ungrounded_count=0,
+        model_name=model_name,
+    )
 
 
 def test_appending_an_utterance_creates_the_session_implicitly() -> None:
@@ -90,6 +124,91 @@ def test_dismissed_alerts_are_isolated_per_session() -> None:
 
     assert len(store.get_memory("s1").dismissed_alerts) == 1
     assert len(store.get_memory("s2").dismissed_alerts) == 0
+
+
+def test_timeline_events_can_be_added_and_carry_a_timestamp() -> None:
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="fever"))
+    utterance_id = store.get_memory("s1").utterances[0].id
+
+    event = store.add_timeline_event(
+        "s1",
+        AddTimelineEventRequest(
+            type="symptom_mentioned", description="fever mentioned", source_utterance_id=utterance_id
+        ),
+    )
+
+    assert event.type == "symptom_mentioned"
+    assert event.timestamp  # non-empty, server-set
+    assert store.get_memory("s1").timeline == [event]
+
+
+def test_dismissing_an_alert_automatically_appends_a_timeline_event() -> None:
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="chest pain"))
+
+    store.add_dismissed_alert("s1", AddDismissedAlertRequest(reason="false positive"))
+
+    timeline = store.get_memory("s1").timeline
+    assert len(timeline) == 1
+    assert timeline[0].type == "alert_dismissed"
+    assert "false positive" in timeline[0].description
+
+
+def test_generate_summary_stores_it_as_an_unapproved_draft() -> None:
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="fever"))
+    summarizer = _StubSummarizer(_empty_summary())
+
+
+    summary = asyncio.run(store.generate_summary("s1", summarizer))
+
+    assert summary.model_name == "stub"
+    memory = store.get_memory("s1")
+    assert memory.draft_summary == summary
+    assert memory.summary_approved is False
+
+
+def test_approving_a_summary_without_a_draft_raises() -> None:
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="x"))
+
+    with pytest.raises(NoDraftSummaryError):
+        store.approve_summary("s1")
+
+
+def test_approving_an_unknown_session_raises_session_not_found() -> None:
+    store = MemoryStore()
+
+    with pytest.raises(SessionNotFoundError):
+        store.approve_summary("never-created")
+
+
+def test_approving_a_summary_after_generating_marks_it_approved() -> None:
+
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="fever"))
+    asyncio.run(store.generate_summary("s1", _StubSummarizer(_empty_summary())))
+
+    store.approve_summary("s1")
+
+    assert store.get_memory("s1").summary_approved is True
+
+
+def test_regenerating_a_summary_resets_approval() -> None:
+    # A new draft always supersedes a prior approval -- Blueprint Section
+    # 2.4's "never auto-finalized" rule extended to regeneration.
+
+    store = MemoryStore()
+    store.append_utterance("s1", AppendUtteranceRequest(original_text="fever"))
+    asyncio.run(store.generate_summary("s1", _StubSummarizer(_empty_summary())))
+    store.approve_summary("s1")
+    assert store.get_memory("s1").summary_approved is True
+
+    asyncio.run(store.generate_summary("s1", _StubSummarizer(_empty_summary("stub-v2"))))
+
+    assert store.get_memory("s1").summary_approved is False
+    assert store.get_memory("s1").draft_summary.model_name == "stub-v2"  # type: ignore[union-attr]
 
 
 def test_clear_session_removes_all_memory_for_that_session_only() -> None:

@@ -121,6 +121,78 @@ describe("gateway memory proxy", () => {
     expect(response.json().error).toBe("orchestrator_unavailable");
   });
 
+  it("forwards POST summary/generate to orchestrator and returns the structured summary", async () => {
+    upstream = createServer((req, res) => {
+      expect(req.method).toBe("POST");
+      expect(req.url).toBe("/sessions/s1/summary/generate");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ model_name: "stub", complaints: [] }));
+    });
+    const upstreamPort = await listen(upstream);
+
+    app = await buildApp({
+      jwtSecret: "test-secret",
+      speechPipelineWsUrl: "ws://localhost:0",
+      orchestratorUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+
+    const response = await app.inject({ method: "POST", url: "/sessions/s1/summary/generate" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().model_name).toBe("stub");
+  });
+
+  it("returns 503 with a reason when orchestrator is unreachable for summary/generate", async () => {
+    app = await buildApp({
+      jwtSecret: "test-secret",
+      speechPipelineWsUrl: "ws://localhost:0",
+      orchestratorUrl: "http://127.0.0.1:1",
+    });
+
+    const response = await app.inject({ method: "POST", url: "/sessions/s1/summary/generate" });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toBe("orchestrator_unavailable");
+  });
+
+  it("forwards POST summary/approve and its 204 status verbatim", async () => {
+    upstream = createServer((req, res) => {
+      expect(req.method).toBe("POST");
+      expect(req.url).toBe("/sessions/s1/summary/approve");
+      res.writeHead(204);
+      res.end();
+    });
+    const upstreamPort = await listen(upstream);
+
+    app = await buildApp({
+      jwtSecret: "test-secret",
+      speechPipelineWsUrl: "ws://localhost:0",
+      orchestratorUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+
+    const response = await app.inject({ method: "POST", url: "/sessions/s1/summary/approve" });
+
+    expect(response.statusCode).toBe(204);
+  });
+
+  it("forwards a 409 from orchestrator when approving with no draft summary", async () => {
+    upstream = createServer((_req, res) => {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ detail: "No draft summary to approve -- generate one first" }));
+    });
+    const upstreamPort = await listen(upstream);
+
+    app = await buildApp({
+      jwtSecret: "test-secret",
+      speechPipelineWsUrl: "ws://localhost:0",
+      orchestratorUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+
+    const response = await app.inject({ method: "POST", url: "/sessions/s1/summary/approve" });
+
+    expect(response.statusCode).toBe(409);
+  });
+
   it("forwards a 404 from orchestrator (e.g. unknown entry) rather than masking it", async () => {
     upstream = createServer((_req, res) => {
       res.writeHead(404, { "Content-Type": "application/json" });

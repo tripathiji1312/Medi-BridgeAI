@@ -674,4 +674,110 @@ describe("LiveTranscriptPanel", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("generating then approving a summary shows DRAFT then APPROVED, and the timeline reflects new events", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal(
+      "navigator",
+      Object.assign({}, navigator, {
+        mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(makeFakeMediaStream()) },
+      }),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn().mockImplementation(() => makeFakeAudioContext()),
+    );
+
+    let generated = false;
+    let approved = false;
+    const stubSummary = {
+      patient_info: null,
+      complaints: [{ text: "Fever for three days", source_utterance_id: "u1" }],
+      symptoms: [],
+      objective: [],
+      diagnoses_mentioned: [],
+      medications: [],
+      recommendations: [],
+      action_items: [],
+      follow_up: [],
+      discarded_ungrounded_count: 0,
+      model_name: "stub-model",
+    };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/summary/generate")) {
+        generated = true;
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(stubSummary) });
+      }
+      if (typeof url === "string" && url.includes("/summary/approve")) {
+        approved = true;
+        return Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve({}) });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            session_id: "s1",
+            utterances: [],
+            case_memory: [],
+            dismissed_alerts: [],
+            timeline: [
+              { id: "e1", type: "symptom_mentioned", description: "fever mentioned", source_utterance_id: "u1", timestamp: "2026-08-05T10:00:00.000Z" },
+            ],
+            draft_summary: generated ? stubSummary : null,
+            summary_approved: approved,
+          }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ThemeProvider>
+        <LiveTranscriptPanel />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /consent to audio recording/i }));
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const socket = FakeWebSocket.instances.at(-1)!;
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "final",
+          utterance_id: "u1",
+          session_id: "s1",
+          segment: {
+            text: "mujhe bukhaar hai",
+            is_final: true,
+            confidence: 0.9,
+            start_ms: 0,
+            end_ms: 900,
+            language: "hi",
+          },
+          error: null,
+          latency_ms: 120,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("fever mentioned")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /generate summary/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/DRAFT — AI-generated, not yet reviewed/)).toBeInTheDocument();
+    });
+    expect(screen.getByText("Fever for three days")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /approve summary/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("APPROVED")).toBeInTheDocument();
+    });
+
+    vi.unstubAllGlobals();
+  });
 });

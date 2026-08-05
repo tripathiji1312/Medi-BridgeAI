@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.clinical_nlp.schemas import MedicalEntity
 from app.routes.transcribe_ws import create_transcribe_router
 from tests.stub_provider import (
     RecordingStubASRProvider,
@@ -649,3 +650,148 @@ def test_risk_scoring_only_runs_on_finals_not_partials() -> None:
             _finals_from(ws)
 
     assert len(risk_scorer.calls) == 2
+
+
+def test_symptom_and_medication_entities_are_posted_as_timeline_events() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    entity_extractor = RecordingStubEntityExtractor(
+        entities=[
+            MedicalEntity(
+                text="fever", category="symptom", canonical_name="fever", canonical_code="R50.9",
+                definition="d", confidence=1.0, start_char=0, end_char=5, is_fuzzy_match=False,
+            ),
+            MedicalEntity(
+                text="paracetamol", category="medication", canonical_name="paracetamol", canonical_code=None,
+                definition="d", confidence=1.0, start_char=0, end_char=11, is_fuzzy_match=False,
+            ),
+        ]
+    )
+    orchestrator_client = RecordingStubOrchestratorClient()
+    app = _build_app(
+        asr_provider, entity_extractor=entity_extractor, orchestrator_client=orchestrator_client
+    )
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            _finals_from(ws)
+
+    event_types = [call[1] for call in orchestrator_client.timeline_calls]
+    assert event_types.count("symptom_mentioned") == 2  # once per final
+    assert event_types.count("medication_mentioned") == 2
+
+
+def test_emergency_alert_is_posted_as_an_alert_triggered_timeline_event() -> None:
+    asr_provider = RecordingStubASRProvider(text="chest pain")
+    emergency_detector = RecordingStubEmergencyDetector(
+        alert=True, reason="Detected emergency keyword(s): chest pain."
+    )
+    orchestrator_client = RecordingStubOrchestratorClient()
+    app = _build_app(
+        asr_provider, emergency_detector=emergency_detector, orchestrator_client=orchestrator_client
+    )
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            _finals_from(ws)
+
+    triggered = [c for c in orchestrator_client.timeline_calls if c[1] == "alert_triggered"]
+    assert len(triggered) == 2
+    assert all("chest pain" in c[2] for c in triggered)
+
+
+def test_a_constant_risk_level_across_finals_only_posts_one_risk_level_changed_event() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    risk_scorer = RecordingStubRiskScorer(level="medium", raw_level="medium")
+    orchestrator_client = RecordingStubOrchestratorClient()
+    app = _build_app(asr_provider, risk_scorer=risk_scorer, orchestrator_client=orchestrator_client)
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2  # two finals, same risk level each time
+    changed = [c for c in orchestrator_client.timeline_calls if c[1] == "risk_level_changed"]
+    assert len(changed) == 1  # only the first transition (None -> medium) is posted
+
+
+def test_risk_level_actually_changing_between_finals_posts_a_second_event() -> None:
+    from app.clinical_nlp.schemas import RiskAssessment, RiskLevel
+    from app.emotion.schemas import EmotionCategory
+
+    class AlternatingRiskScorer:
+        """Returns 'low' then 'high' -- a real changing per-turn signal,
+        unlike the fixed-level stub used in the constant-level test above."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def score(
+            self,
+            session_id: str,
+            text: str,
+            language: str,
+            emotion_label: EmotionCategory | None,
+            emotion_confidence: float | None,
+        ) -> RiskAssessment:
+            self.calls += 1
+            level: RiskLevel = "low" if self.calls == 1 else "high"
+            return RiskAssessment(
+                level=level, raw_level=level, reason="stub", emergency_triggered=False,
+                symptom_count=0, lexicon_version="stub",
+            )
+
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    orchestrator_client = RecordingStubOrchestratorClient()
+    app = _build_app(
+        asr_provider, risk_scorer=AlternatingRiskScorer(), orchestrator_client=orchestrator_client  # type: ignore[arg-type]
+    )
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    changed = [c for c in orchestrator_client.timeline_calls if c[1] == "risk_level_changed"]
+    assert len(changed) == 2
+    assert "low" in changed[0][2]
+    assert "high" in changed[1][2]
+
+
+def test_timeline_event_posting_failure_does_not_crash_the_connection() -> None:
+    asr_provider = RecordingStubASRProvider(text="fixture transcript")
+    entity_extractor = RecordingStubEntityExtractor(
+        entities=[
+            MedicalEntity(
+                text="fever", category="symptom", canonical_name="fever", canonical_code="R50.9",
+                definition="d", confidence=1.0, start_char=0, end_char=5, is_fuzzy_match=False,
+            )
+        ]
+    )
+    orchestrator_client = RecordingStubOrchestratorClient(timeline_should_fail=True)
+    app = _build_app(
+        asr_provider, entity_extractor=entity_extractor, orchestrator_client=orchestrator_client
+    )
+    audio = _load_fixture()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/transcribe") as ws:
+            for i in range(0, len(audio), CHUNK_BYTES):
+                ws.send_bytes(audio[i : i + CHUNK_BYTES])
+            finals = _finals_from(ws)
+
+    assert len(finals) >= 2
+    for event in finals:
+        assert event["segment"]["text"] == "fixture transcript"
+    assert orchestrator_client.timeline_calls == []

@@ -16,10 +16,54 @@ export interface Utterance {
   sequence: number;
 }
 
+export interface DismissedAlert {
+  id: string;
+  reason: string;
+  source_utterance_id: string | null;
+}
+
+export type TimelineEventType =
+  | "symptom_mentioned"
+  | "medication_mentioned"
+  | "alert_triggered"
+  | "alert_dismissed"
+  | "risk_level_changed";
+
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  description: string;
+  source_utterance_id: string | null;
+  timestamp: string;
+}
+
+export interface SummaryBullet {
+  text: string;
+  source_utterance_id: string;
+}
+
+export interface StructuredSummary {
+  patient_info: string | null;
+  complaints: SummaryBullet[];
+  symptoms: SummaryBullet[];
+  objective: SummaryBullet[];
+  diagnoses_mentioned: SummaryBullet[];
+  medications: SummaryBullet[];
+  recommendations: SummaryBullet[];
+  action_items: SummaryBullet[];
+  follow_up: SummaryBullet[];
+  discarded_ungrounded_count: number;
+  model_name: string;
+}
+
 export interface SessionMemory {
   session_id: string;
   utterances: Utterance[];
   case_memory: CaseMemoryEntry[];
+  dismissed_alerts: DismissedAlert[];
+  timeline: TimelineEvent[];
+  draft_summary: StructuredSummary | null;
+  summary_approved: boolean;
 }
 
 export interface UseConversationMemoryOptions {
@@ -48,6 +92,11 @@ export function useConversationMemory(
   const gatewayHttpUrl = options.gatewayHttpUrl ?? GATEWAY_HTTP_URL;
   const [memory, setMemory] = useState<SessionMemory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Separate from `error` -- summary generation is a slower, more
+  // failure-prone LLM call than the memory fetch itself, and shouldn't
+  // clobber (or be clobbered by) an unrelated memory-fetch error.
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!sessionId) return;
@@ -84,5 +133,52 @@ export function useConversationMemory(
     [sessionId, fetchImpl, gatewayHttpUrl, refresh],
   );
 
-  return { memory, error, removeCaseMemoryEntry };
+  const generateSummary = useCallback(async () => {
+    if (!sessionId) return;
+    setIsGeneratingSummary(true);
+    try {
+      const response = await fetchImpl(`${gatewayHttpUrl}/sessions/${sessionId}/summary/generate`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ detail: null }));
+        setSummaryError(
+          (body as { detail?: string }).detail ?? `Summary generation failed (status ${response.status})`,
+        );
+        return;
+      }
+      setSummaryError(null);
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : "Summary generation failed");
+    } finally {
+      setIsGeneratingSummary(false);
+      await refresh();
+    }
+  }, [sessionId, fetchImpl, gatewayHttpUrl, refresh]);
+
+  const approveSummary = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetchImpl(`${gatewayHttpUrl}/sessions/${sessionId}/summary/approve`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        setSummaryError(`Approval failed (status ${response.status})`);
+      }
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : "Approval failed");
+    } finally {
+      await refresh();
+    }
+  }, [sessionId, fetchImpl, gatewayHttpUrl, refresh]);
+
+  return {
+    memory,
+    error,
+    removeCaseMemoryEntry,
+    generateSummary,
+    approveSummary,
+    summaryError,
+    isGeneratingSummary,
+  };
 }

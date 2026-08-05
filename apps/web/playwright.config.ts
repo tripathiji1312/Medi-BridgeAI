@@ -79,6 +79,11 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       env: {
         PYTHONPATH: ".",
+        // Phase 7: orchestrator's POST .../summary/generate calls
+        // clinical-nlp's /summarize endpoint directly -- without this it
+        // silently defaults to localhost:8002 (this service's normal dev
+        // port), which is wrong here since E2E runs clinical-nlp on 8102.
+        CLINICAL_NLP_URL: `http://localhost:${CLINICAL_NLP_PORT}`,
       },
       timeout: 30_000,
     },
