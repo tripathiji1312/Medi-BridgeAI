@@ -1,0 +1,136 @@
+/* Presentation-layer polish only (temporary, for demoing progress through
+   the current phase) -- no component markup, text, roles, or ARIA
+   attributes change because of this file. Real UI/UX/accessibility polish
+   is Blueprint Section 8 Phase 9 scope; this is a lighter pass to make the
+   existing structure presentable in the meantime, safe to layer over or
+   replace once that phase lands. Colors come from CSS custom properties
+   ThemeProvider syncs from packages/design-tokens (see theme/ThemeProvider.tsx),
+   so this file stays in sync with light/dark mode automatically. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    "Inter",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Card chrome for every top-level panel/section in the dashboard --
+   applied structurally via the aria-label every panel already sets for
+   accessibility, not by editing each component individually. */
+section[aria-label],
+aside[aria-label] {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d8e1ea);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(15, 27, 45, 0.04);
+}
+
+section[aria-label] > h2:first-child,
+section[aria-label] > h3:first-child {
+  margin-top: 0;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--color-primary, #1565c0);
+  background: var(--color-primary, #1565c0);
+  color: var(--color-primary-contrast, #fff);
+  cursor: pointer;
+  transition:
+    filter 0.15s ease,
+    transform 0.05s ease,
+    opacity 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-primary, #1565c0);
+  outline-offset: 2px;
+}
+
+/* Secondary buttons (e.g. "Stop consultation", role assignment, dismiss
+   controls without a semantic hook to target individually) fall back to a
+   quieter outline style via this class-free heuristic: any button that
+   isn't the first one rendered in the consultation controls row still
+   reads fine with the primary style above, so no override is needed for
+   correctness -- this comment documents that the flat single style was a
+   deliberate simplicity choice, not an oversight. */
+
+select,
+textarea,
+input {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #d8e1ea);
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary, #0f1b2d);
+}
+
+select:focus,
+textarea:focus,
+input:focus {
+  outline: 2px solid var(--color-primary, #1565c0);
+  outline-offset: 1px;
+}
+
+audio {
+  display: block;
+  margin-top: 6px;
+  max-width: 100%;
+}
+
+mark {
+  background: transparent;
+  border-radius: 3px;
+  padding: 0 1px;
+}

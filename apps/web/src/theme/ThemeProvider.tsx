@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { colorTokens, type ColorTokens, type ThemeMode } from "@medibridge/design-tokens";
 
 const STORAGE_KEY = "medibridge-theme-mode";
@@ -46,6 +46,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }),
     [mode],
   );
+
+  // Mirrors the active palette onto CSS custom properties so plain global
+  // CSS (index.css -- buttons, form controls, card chrome) can react to
+  // light/dark mode too, without every one of this app's many panels
+  // needing to pass theme colors down as inline styles individually. Purely
+  // a presentation-layer hook -- doesn't change any component's markup,
+  // text, or ARIA attributes.
+  useEffect(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--color-background", value.colors.background);
+    root.setProperty("--color-surface", value.colors.surface);
+    root.setProperty("--color-primary", value.colors.primary);
+    root.setProperty("--color-primary-contrast", value.colors.primaryContrast);
+    root.setProperty("--color-text-primary", value.colors.textPrimary);
+    root.setProperty("--color-text-secondary", value.colors.textSecondary);
+    root.setProperty("--color-border", value.colors.border);
+    root.setProperty("--color-danger", value.colors.danger);
+    root.setProperty("--color-warning", value.colors.warning);
+    root.setProperty("--color-success", value.colors.success);
+  }, [value.colors]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
