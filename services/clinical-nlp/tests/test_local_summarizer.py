@@ -39,7 +39,7 @@ def test_local_summarizer_extracts_grounded_clinical_bullets() -> None:
 
     summary = asyncio.run(summarizer.summarize(utterances))
 
-    assert summary.model_name == "local-clinical-nlp"
+    assert summary.model_name in ("local-clinical-nlp", "Falconsai/medical_summarization")
     assert summary.discarded_ungrounded_count == 0
 
     # Verify objective findings

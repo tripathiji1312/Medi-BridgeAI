@@ -11,6 +11,7 @@ source_utterance_id from the transcript and satisfies grounding validation.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -58,10 +59,30 @@ _RECOMMENDATION_KEYWORDS = (
 )
 
 
+DEFAULT_LOCAL_SUMMARIZER_MODEL = "Falconsai/medical_summarization"
+
+
 class LocalClinicalSummarizer(Summarizer):
-    def __init__(self, lexicon: MedicalLexicon | None = None) -> None:
+    def __init__(self, lexicon: MedicalLexicon | None = None, model_name: str | None = None) -> None:
         self._lexicon = lexicon or load_lexicon()
-        self._model_name = "local-clinical-nlp"
+        self._model_name = model_name or os.environ.get("LOCAL_SUMMARIZER_MODEL", DEFAULT_LOCAL_SUMMARIZER_MODEL)
+        self._pipe: Any = None
+        self._pipe_initialized = False
+
+    def _ensure_pipe_loaded(self) -> bool:
+        if self._pipe_initialized:
+            return self._pipe is not None
+        self._pipe_initialized = True
+        try:
+            from transformers import pipeline
+            import torch
+
+            device = 0 if torch.cuda.is_available() else -1
+            self._pipe = pipeline("summarization", model=self._model_name, device=device)
+            return True
+        except Exception:
+            self._pipe = None
+            return False
 
     async def summarize(self, utterances: list[SummaryUtterance]) -> StructuredSummary:
         raw_fields: dict[str, list[dict[str, str]]] = {f: [] for f in _SUMMARY_SCHEMA_FIELDS}

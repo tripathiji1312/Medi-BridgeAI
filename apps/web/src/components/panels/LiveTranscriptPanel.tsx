@@ -19,6 +19,7 @@ import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
 import { EmergencyAlertCard } from "../alerts/EmergencyAlertCard";
 import { ConsentBanner } from "../alerts/ConsentBanner";
 import { VisionAlertCard } from "../alerts/VisionAlertCard";
+import { VideoMonitorPanel } from "./VideoMonitorPanel";
 import { ExportModal } from "./ExportModal";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
@@ -65,7 +66,7 @@ export function LiveTranscriptPanel() {
     summaryError,
     isGeneratingSummary,
   } = useConversationMemory(sessionId, finals.length);
-  const { alert: visionAlert, clearAlert: clearVisionAlert } = useVideoCapture({
+  const { alert: visionAlert, clearAlert: clearVisionAlert, mediaStream } = useVideoCapture({
     sessionId,
     enabled: cameraConsented === true,
   });
@@ -138,6 +139,12 @@ export function LiveTranscriptPanel() {
       )}
       {visionAlert && (
         <VisionAlertCard reason={visionAlert.reason} onAcknowledge={clearVisionAlert} />
+      )}
+      {cameraConsented && mediaStream && (
+        <VideoMonitorPanel
+          stream={mediaStream}
+          onDisable={() => setCameraConsented(false)}
+        />
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
         {!consentGiven ? (

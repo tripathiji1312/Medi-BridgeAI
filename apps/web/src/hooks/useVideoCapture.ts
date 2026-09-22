@@ -17,6 +17,7 @@ export interface UseVideoCaptureState {
   alert: VideoCaptureAlert | null;
   error: string | null;
   clearAlert: () => void;
+  mediaStream: MediaStream | null;
 }
 
 /** Captures camera frames at ~2fps and POSTs them to the vision-service
@@ -30,6 +31,7 @@ export function useVideoCapture({
 }: UseVideoCaptureOptions): UseVideoCaptureState {
   const [alert, setAlert] = useState<VideoCaptureAlert | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -50,6 +52,7 @@ export function useVideoCapture({
           return;
         }
         streamRef.current = stream;
+        setMediaStream(stream);
 
         const video = document.createElement("video");
         video.srcObject = stream;
@@ -107,8 +110,9 @@ export function useVideoCapture({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       videoRef.current = null;
+      setMediaStream(null);
     };
   }, [enabled, sessionId, fps, gatewayUrl]);
 
-  return { alert, error, clearAlert };
+  return { alert, error, clearAlert, mediaStream };
 }
