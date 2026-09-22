@@ -3,6 +3,7 @@ import { useLiveTranscript } from "../../hooks/useLiveTranscript";
 import { useSpeakerRoles } from "../../hooks/useSpeakerRoles";
 import { useDismissAlert } from "../../hooks/useDismissAlert";
 import { useConversationMemory } from "../../hooks/useConversationMemory";
+import { useVideoCapture } from "../../hooks/useVideoCapture";
 import { useTheme } from "../../theme/ThemeProvider";
 import { pcm16ToWavDataUrl } from "../../audio/wav";
 import { formatMsAsTimestamp } from "../../utils/time";
@@ -14,6 +15,8 @@ import { EmotionIndicator } from "../shared/EmotionIndicator";
 import { HighlightedText } from "../shared/HighlightedText";
 import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
 import { EmergencyAlertCard } from "../alerts/EmergencyAlertCard";
+import { ConsentBanner } from "../alerts/ConsentBanner";
+import { VisionAlertCard } from "../alerts/VisionAlertCard";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
 import { SummaryPanel } from "./SummaryPanel";
@@ -32,6 +35,8 @@ export function LiveTranscriptPanel() {
   });
   const { roleFor, assignRole } = useSpeakerRoles();
   const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
+  // Camera consent: null = not yet asked, true/false = user chose
+  const [cameraConsented, setCameraConsented] = useState<boolean | null>(null);
 
   const finals = events.filter((e) => e.type === "final" && e.segment);
   const latestPartial = [...events].reverse().find((e) => e.type === "partial" && e.segment);
@@ -51,6 +56,10 @@ export function LiveTranscriptPanel() {
     summaryError,
     isGeneratingSummary,
   } = useConversationMemory(sessionId, finals.length);
+  const { alert: visionAlert, clearAlert: clearVisionAlert } = useVideoCapture({
+    sessionId,
+    enabled: cameraConsented === true,
+  });
   // Most recent utterance still carrying an un-dismissed emergency alert --
   // one persistent banner (Blueprint Section 2.2: "persistent ... banner"),
   // not one per matching utterance in the scrolling transcript.
@@ -60,6 +69,18 @@ export function LiveTranscriptPanel() {
 
   return (
     <section aria-label="Live transcript" style={{ color: colors.textPrimary }}>
+      {/* Camera consent banner -- shown once after audio recording starts,
+          before the first camera frame is captured (Blueprint §8). */}
+      {consentGiven && cameraConsented === null && (
+        <ConsentBanner
+          onConsent={(consented) => {
+            setCameraConsented(consented);
+          }}
+        />
+      )}
+      {visionAlert && (
+        <VisionAlertCard reason={visionAlert.reason} onAcknowledge={clearVisionAlert} />
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         {!consentGiven ? (
           <button onClick={() => void start()}>Start consultation (I consent to audio recording)</button>

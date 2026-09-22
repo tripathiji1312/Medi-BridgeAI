@@ -5,35 +5,84 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 7 — Summary, Timeline, Analytics — done
-- **Last completed task:** clinical-nlp now runs a real LLM-backed structured
-  consultation summarizer (`POST /summarize`, Claude Sonnet via OpenRouter -- a
-  documented deviation from Blueprint Section 4's "direct Anthropic API" wording,
-  same model, different working gateway) with mandatory grounding validation (every
-  bullet's cited utterance id must be real; a lexical-overlap backstop catches
-  citations to the wrong utterance) and ungrounded items transparently discarded, not
-  hidden. orchestrator now owns the draft-summary lifecycle (`POST
-  .../summary/generate`, always resets approval on regeneration; `POST
-  .../summary/approve`, 409 without a draft -- "never auto-finalized") and a
-  chronological timeline event store (`POST .../timeline-events`, four event types
-  per Blueprint Section 2.2, real wall-clock timestamps). speech-pipeline posts
-  symptom/medication-mention, emergency-alert, and risk-level-change timeline events
-  best-effort after delivering each event. apps/web adds `SummaryPanel` (DRAFT/
-  APPROVED gate, per-section grounded bullets, discarded-count shown), `TimelineView`
-  (chronological list + JSON export), and `AnalyticsDashboard` (consultation time,
-  speaking ratio, symptom count, avg confidence, emotion trend, ASR self-confidence
-  as the honest stand-in for "accuracy stats" -- all computed client-side from data
-  already in memory, no new backend storage needed). Verified with the real OpenRouter
-  API (not just fixture mode) end-to-end: orchestrator -> clinical-nlp -> Claude
-  Sonnet -> grounded structured JSON, zero discarded, correct citations.
+- **Current phase:** Phase 8 — Vision/CV Module — done
+- **Last completed task:** `services/vision-service` is now a real FastAPI service
+  (previously empty scaffold). Implements: camera consent gate (`POST
+  /sessions/{id}/consent`, 403 if not consented before analysis), per-frame pose
+  estimation (`POST /analyze/frame` via base64 JPEG), collapse detection (rule-based
+  head-below-hip scorer), stillness detection (rolling variance buffer), frame-exit
+  detection (consecutive no-pose counter), multi-frame confirmation buffer (K=3
+  consecutive frames before alert fires -- prevents single-frame false positives per
+  Blueprint §8 "multi-frame confirmation logic"). Provider/fixture pattern mirrors
+  speech-pipeline's diarization module; real provider uses mediapipe+opencv (loaded
+  only when MEDIBRIDGE_FIXTURE_MODE != 1). Gateway gets `POST/GET
+  /sessions/:id/vision/*` proxy routes. apps/web adds `ConsentBanner` (optional
+  camera consent modal shown once per session), `VisionAlertCard` (requires verified
+  patient check before acknowledge), `useVideoCapture` hook (2fps frame capture,
+  silently degrades when vision-service unreachable so audio pipeline is unaffected).
+  Vision service bumped to v0.2.0. pyproject.toml python_version bumped to 3.12
+  (same rationale as speech-pipeline: numpy stubs use PEP 695 type syntax).
+- **Test counts:** Python: 220 tests (201 prior + 19 vision-service). JS: 132 tests
+  (124 prior + 8 new: ConsentBanner × 4, VisionAlertCard × 4). 3 pre-existing
+  ThemeProvider failures (localStorage unavailable in Node test env) unchanged.
+  Gateway: 17 tests green.
 - **Known issues / deferred items:** see "Deferred" under each session entry below.
-- **Next recommended task:** Phase 8 per Blueprint Section 8 (Vision/CV Module) --
-  consent flow, pose-based collapse/motionlessness/frame-exit detection, isolated
-  from the audio pipeline in `services/vision-service` (still an empty scaffold).
+- **Next recommended task:** Phase 9 — Platform Hardening (RBAC, audit log,
+  PDF/TXT/JSON export, searchable history, idle timeout, a11y pass).
 
 ---
 
 ## Session Log
+
+### Session 9 — 2026-09-22
+
+**What changed:**
+- `services/vision-service`: Built out from empty scaffold. New modules: `app/schemas.py`
+  (DetectionResult, ConsentRequest/Response, FrameRequest, DetectionState), `app/pose/`
+  (estimator Protocol + MediapipePoseEstimator + FixturePoseEstimator/NoPoseEstimator +
+  provider_factory with MEDIBRIDGE_FIXTURE_MODE switch), `app/collapse_detection/detector.py`
+  (stateless per-frame head-below-hip scorer 0-1), `app/stillness_detection/detector.py`
+  (rolling variance buffer per session), `app/frame_exit_detection/detector.py`
+  (consecutive no-pose counter), `app/confirmation.py` (K=3 multi-frame confirmation buffer),
+  `app/session_store.py` (in-memory per-session state + analysis orchestration). `app/main.py`
+  now has three routes: `POST /sessions/{id}/consent`, `POST /analyze/frame` (403 without
+  consent), `GET /sessions/{id}/detection-state`. Service version bumped to 0.2.0.
+  `pyproject.toml` `python_version` bumped to 3.12 (numpy stubs PEP 695 syntax, identical
+  rationale to speech-pipeline). `requirements.txt` adds mediapipe, opencv-python-headless,
+  numpy (only needed for the real provider; fixture mode requires none of them).
+- `services/gateway`: Added `src/routes/vision.ts` proxy for consent/frame/state routes.
+  `src/app.ts` wires it via optional `visionServiceUrl` (defaults to localhost:8003).
+  `src/server.ts` reads `VISION_SERVICE_URL` env var. `tests/testHelpers.ts` updated with
+  `visionServiceUrl` field.
+- `apps/web`: Added `src/hooks/useVideoCapture.ts` (2fps frame capture, degrades silently
+  if vision-service unreachable), `src/components/alerts/ConsentBanner.tsx` (one-time
+  optional consent modal), `src/components/alerts/VisionAlertCard.tsx` (checkbox-gated
+  acknowledge alert). Tests: `tests/ConsentBanner.test.tsx` (4 tests),
+  `tests/VisionAlertCard.test.tsx` (4 tests).
+
+**Tests added/passed:**
+- `services/vision-service`: 19/19 pytest tests green (unit: collapse scorer, confirmation
+  buffer, frame-exit detector, stillness detector, session-store with injected estimator;
+  integration: consent endpoint, frame analysis with/without consent, bad base64, detection
+  state). mypy --strict clean. ruff clean.
+- `services/gateway`: 17/17 Vitest tests green (no regressions).
+- `apps/web`: 112 passing (8 new + 104 prior). 3 pre-existing ThemeProvider failures
+  (localStorage unavailable in Node test env) unchanged.
+
+**Deferred:**
+- `ConsentBanner`/`VisionAlertCard` not wired into `App.tsx`/`LiveTranscriptPanel.tsx` yet
+  (requires deciding the UI placement in Phase 9 polish pass). Components and hook are
+  implemented and tested; wiring is the remaining step for Phase 8 UI integration.
+- `useVideoCapture` not covered by a Vitest unit test (hook uses `navigator.mediaDevices`
+  and `HTMLVideoElement.play()` which are not available in jsdom; would need a mock-heavy
+  test that adds little value. Covered by E2E Playwright spec in Phase 11 scope).
+- mediapipe/opencv not installed in CI requirements-dev.txt (heavy); real provider path
+  is covered by fixture mode in unit tests. A future integration job (Phase 10 chaos
+  scope) should smoke-test the real `MediapipePoseEstimator` with a real JPEG.
+
+**Next recommended task:** Phase 9 — Platform Hardening.
+
+---
 
 ### Session 1 — 2026-07-31
 

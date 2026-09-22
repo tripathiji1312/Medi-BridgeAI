@@ -27,19 +27,22 @@ class MmsTTSProvider(TTSProvider):
                 "TTS provider; otherwise use FixtureTTSProvider for tests."
             ) from exc
 
+        import torch
+
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self._model = VitsModel.from_pretrained(model_name)
+        self._model = VitsModel.from_pretrained(model_name).to(self._device)
         self._sample_rate: int = self._model.config.sampling_rate
 
     def synthesize(self, text: str, language: str) -> TTSAudioSegment:
         import numpy as np
         import torch
 
-        inputs = self._tokenizer(text, return_tensors="pt")
+        inputs = self._tokenizer(text, return_tensors="pt").to(self._device)
         with torch.no_grad():
             output = self._model(**inputs).waveform
 
-        waveform = output.squeeze().cpu().numpy()
+        waveform = output.squeeze().detach().cpu().numpy()
         clamped = np.clip(waveform, -1.0, 1.0)
         pcm16 = (clamped * 32767).astype(np.int16).tobytes()
 

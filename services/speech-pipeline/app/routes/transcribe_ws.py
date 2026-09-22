@@ -105,9 +105,20 @@ def create_transcribe_router(
 
         async def _reader() -> None:
             """Reads audio chunks continuously so the TCP buffer never stalls."""
+            chunks_received = 0
+            bytes_received = 0
             try:
                 while True:
                     chunk = await websocket.receive_bytes()
+                    chunks_received += 1
+                    bytes_received += len(chunk)
+                    if chunks_received == 1 or chunks_received % 100 == 0:
+                        logger.info(
+                            "session %s: received %d audio chunks (%d bytes)",
+                            session_id[:8],
+                            chunks_received,
+                            bytes_received,
+                        )
                     try:
                         events = await _loop.run_in_executor(None, session.push_chunk, chunk)
                     except Exception:
@@ -120,6 +131,12 @@ def create_transcribe_router(
             except Exception:
                 logger.exception("_reader task died unexpectedly")
             finally:
+                logger.info(
+                    "session %s: audio reader ended (total %d chunks, %d bytes)",
+                    session_id[:8],
+                    chunks_received,
+                    bytes_received,
+                )
                 await _send_queue.put(None)  # sentinel
 
         _asyncio.create_task(_reader())
@@ -224,7 +241,10 @@ def _run_translation(event: TranscriptEvent, get_mt_provider: MTProviderGetter |
     try:
         segment = event.segment
         assert segment is not None
-        translation = get_mt_provider().translate(segment.text, segment.language, "en")
+        if not segment.text.strip():
+            return event
+        target_lang = "hi" if segment.language == "en" else "en"
+        translation = get_mt_provider().translate(segment.text, segment.language, target_lang)
         return event.model_copy(update={"translation": translation})
     except Exception as exc:  # noqa: BLE001 - any MT failure degrades, never crashes the session
         logger.exception("translation failed for utterance %s", event.utterance_id)
@@ -232,12 +252,14 @@ def _run_translation(event: TranscriptEvent, get_mt_provider: MTProviderGetter |
 
 
 def _run_back_translation(event: TranscriptEvent, get_mt_provider: MTProviderGetter | None) -> TranscriptEvent:
-    """EN -> HI, the reverse leg of Blueprint Section 3.2 step 6's
+    """EN -> HI (or HI -> EN), the reverse leg of Blueprint Section 3.2 step 6's
     back-translation consistency check. Only runs when the forward
     translation succeeded -- there's nothing to translate back otherwise."""
     if get_mt_provider is None or event.translation is None:
         return event
     try:
+        if not event.translation.text.strip():
+            return event
         back_translation = get_mt_provider().translate(
             event.translation.text, event.translation.target_language, event.translation.source_language
         )
