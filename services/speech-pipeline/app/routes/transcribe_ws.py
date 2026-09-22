@@ -108,14 +108,21 @@ def create_transcribe_router(
             try:
                 while True:
                     chunk = await websocket.receive_bytes()
-                    for ev in await _loop.run_in_executor(None, session.push_chunk, chunk):
+                    try:
+                        events = await _loop.run_in_executor(None, session.push_chunk, chunk)
+                    except Exception:
+                        logger.exception("push_chunk failed, continuing")
+                        continue
+                    for ev in events:
                         await _send_queue.put(ev)
             except WebSocketDisconnect:
                 pass
+            except Exception:
+                logger.exception("_reader task died unexpectedly")
             finally:
                 await _send_queue.put(None)  # sentinel
 
-        _asyncio.ensure_future(_reader())
+        _asyncio.create_task(_reader())
 
         last_risk_level: RiskLevel | None = None
         try:
