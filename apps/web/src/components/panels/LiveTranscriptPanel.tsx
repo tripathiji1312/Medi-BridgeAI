@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLiveTranscript } from "../../hooks/useLiveTranscript";
 import { useSpeakerRoles } from "../../hooks/useSpeakerRoles";
 import { useDismissAlert } from "../../hooks/useDismissAlert";
@@ -24,9 +24,12 @@ import { ExportModal } from "./ExportModal";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
 import { SummaryPanel } from "./SummaryPanel";
+import { DdiAlertBanner, type DrugInteractionItem, type AllergyItem } from "../alerts/DdiAlertBanner";
+import { LiveVitalsStrip, type VitalsData } from "./LiveVitalsStrip";
+import { PrescriptionSlipModal } from "./PrescriptionSlipModal";
 import { TimelineView } from "./TimelineView";
 import { AnalyticsDashboard } from "./AnalyticsDashboard";
-import { GATEWAY_WS_URL } from "../../config";
+import { GATEWAY_HTTP_URL, GATEWAY_WS_URL } from "../../config";
 import type { MedicalEntity } from "@medibridge/shared-types";
 
 /** Phase 1-9 scope. Playback uses <audio controls> (no autoplay) so the
@@ -76,6 +79,39 @@ export function LiveTranscriptPanel() {
   const activeEmergencyEvent = [...finals]
     .reverse()
     .find((e) => e.emergency?.alert && !dismissedAlertIds.has(e.utterance_id));
+  const [vitals, setVitals] = useState<VitalsData>({});
+  const [isPrescriptionOpen, setIsPrescriptionOpen] = useState<boolean>(false);
+  const [cdsInteractions, setCdsInteractions] = useState<DrugInteractionItem[]>([]);
+  const [cdsAllergies, setCdsAllergies] = useState<AllergyItem[]>([]);
+
+  useEffect(() => {
+    const meds = allEntities
+      .filter((e) => e.category === "medication")
+      .map((e) => e.canonical_name || e.text);
+    const patientUtterances = finals
+      .filter((f) => roleFor(f.speaker?.speaker_label ?? "") === "patient")
+      .map((f) => f.segment?.text || "");
+
+    if (meds.length > 0 || patientUtterances.length > 0) {
+      fetch(`${GATEWAY_HTTP_URL}/cds/check-interactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          medications: Array.from(new Set(meds)),
+          patient_utterances: patientUtterances,
+          known_allergies: [],
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data) {
+            setCdsInteractions(data.interactions || []);
+            setCdsAllergies(data.allergies || []);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [allEntities.length, finals.length]);
 
   return (
     <section aria-label="Live transcript" style={{ color: colors.textPrimary }}>
@@ -181,6 +217,15 @@ export function LiveTranscriptPanel() {
           📄 Export Record
         </button>
 
+        {/* Official Prescription Slip */}
+        <button
+          onClick={() => setIsPrescriptionOpen(true)}
+          style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, cursor: "pointer" }}
+          title="Open printable official clinical prescription (Rx) slip"
+        >
+          💊 Prescription (Rx)
+        </button>
+
         {/* Camera Safety Monitoring Toggle (100% Opt-In) */}
         {!cameraConsented ? (
           <button
@@ -223,6 +268,23 @@ export function LiveTranscriptPanel() {
           }}
         />
       )}
+
+      {/* CDS Drug-Drug Interaction and Allergy Warning Banner */}
+      <DdiAlertBanner
+        interactions={cdsInteractions}
+        allergies={cdsAllergies}
+        onDismiss={() => {
+          setCdsInteractions([]);
+          setCdsAllergies([]);
+        }}
+      />
+
+      {/* Real-Time Clinical Vitals Telemetry Strip */}
+      <LiveVitalsStrip
+        utterances={finals.map((f) => f.segment?.text || "")}
+        initialVitals={vitals}
+        onVitalsChange={setVitals}
+      />
       {dismissAlertError && (
         <p role="alert" style={{ color: colors.warning, fontSize: 12 }}>
           {dismissAlertError}
@@ -368,6 +430,14 @@ export function LiveTranscriptPanel() {
         events={events}
         entities={allEntities}
         summary={memory?.draft_summary ?? null}
+      />
+
+      <PrescriptionSlipModal
+        isOpen={isPrescriptionOpen}
+        onClose={() => setIsPrescriptionOpen(false)}
+        summary={memory?.draft_summary ?? null}
+        vitals={vitals}
+        sessionId={sessionId}
       />
     </section>
   );

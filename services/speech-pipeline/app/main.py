@@ -12,6 +12,7 @@ from app.emotion.provider_factory import get_emotion_classifier
 from app.health import HealthResponse
 from app.mt.provider_factory import get_mt_provider
 from app.orchestrator_client_factory import get_orchestrator_client
+from app.routes.patient_tts import create_patient_tts_router
 from app.routes.transcribe_ws import create_transcribe_router
 from app.tts.provider_factory import get_tts_provider
 
@@ -66,6 +67,7 @@ app.include_router(
         get_risk_scorer,
     )
 )
+app.include_router(create_patient_tts_router(get_tts_provider))
 
 
 @app.get("/health", response_model=HealthResponse)
