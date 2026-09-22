@@ -177,14 +177,17 @@ async def _enrich_final_event(
     if event.type != "final" or event.segment is None or not event.segment.text.strip():
         return event
 
+    import asyncio as _asyncio
+    _loop = _asyncio.get_event_loop()
+
     event = await _run_emergency_detection(event, get_emergency_detector)
-    event = _run_translation(event, get_mt_provider)
-    event = _run_back_translation(event, get_mt_provider)
+    event = await _loop.run_in_executor(None, _run_translation, event, get_mt_provider)
+    event = await _loop.run_in_executor(None, _run_back_translation, event, get_mt_provider)
     event = await _run_miscommunication_check(event, get_miscommunication_checker)
-    event = _run_tts(event, get_tts_provider)
-    event = _run_diarization(event, session, diarizer, diarizer_error)
+    event = await _loop.run_in_executor(None, _run_tts, event, get_tts_provider)
+    event = await _loop.run_in_executor(None, _run_diarization, event, session, diarizer, diarizer_error)
     event = await _run_entity_extraction(event, get_entity_extractor)
-    event = _run_emotion_classification(event, session, get_emotion_classifier)
+    event = await _loop.run_in_executor(None, _run_emotion_classification, event, session, get_emotion_classifier)
     event = await _run_risk_scoring(event, get_risk_scorer)
     return event
 
