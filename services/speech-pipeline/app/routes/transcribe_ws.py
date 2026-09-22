@@ -99,11 +99,14 @@ def create_transcribe_router(
                 logger.exception("diarization unavailable for this session")
                 diarizer_error = str(exc)
 
+        import asyncio as _asyncio
+        _loop = _asyncio.get_event_loop()
+
         last_risk_level: RiskLevel | None = None
         try:
             while True:
                 chunk = await websocket.receive_bytes()
-                for event in session.push_chunk(chunk):
+                for event in await _loop.run_in_executor(None, session.push_chunk, chunk):
                     event = event.model_copy(update={"session_id": session_id})
                     event = await _enrich_final_event(
                         event,
