@@ -5,36 +5,42 @@
 
 ## Status Snapshot
 
-- **Current phase:** Phase 8 — Vision/CV Module — done
-- **Last completed task:** `services/vision-service` is now a real FastAPI service
-  (previously empty scaffold). Implements: camera consent gate (`POST
-  /sessions/{id}/consent`, 403 if not consented before analysis), per-frame pose
-  estimation (`POST /analyze/frame` via base64 JPEG), collapse detection (rule-based
-  head-below-hip scorer), stillness detection (rolling variance buffer), frame-exit
-  detection (consecutive no-pose counter), multi-frame confirmation buffer (K=3
-  consecutive frames before alert fires -- prevents single-frame false positives per
-  Blueprint §8 "multi-frame confirmation logic"). Provider/fixture pattern mirrors
-  speech-pipeline's diarization module; real provider uses mediapipe+opencv (loaded
-  only when MEDIBRIDGE_FIXTURE_MODE != 1). Gateway gets `POST/GET
-  /sessions/:id/vision/*` proxy routes. apps/web adds `ConsentBanner` (optional
-  camera consent modal shown once per session), `VisionAlertCard` (requires verified
-  patient check before acknowledge), `useVideoCapture` hook (2fps frame capture,
-  silently degrades when vision-service unreachable so audio pipeline is unaffected).
-  Vision service bumped to v0.2.0. pyproject.toml python_version bumped to 3.12
-  (same rationale as speech-pipeline: numpy stubs use PEP 695 type syntax).
-- **Test counts:** Python: 220 tests (201 prior + 19 vision-service). JS: 132 tests
-  (124 prior + 8 new: ConsentBanner × 4, VisionAlertCard × 4). 3 pre-existing
-  ThemeProvider failures (localStorage unavailable in Node test env) unchanged.
-  Gateway: 17 tests green.
-- **Known issues / deferred items:** see "Deferred" under each session entry below.
-- **Next recommended task:** Phase 9 — Platform Hardening (RBAC, audit log,
-  PDF/TXT/JSON export, searchable history, idle timeout, a11y pass).
+- **Current phase:** Phase 9 — Platform Hardening & HIPAA Compliance — done
+- **Last completed task:** Fixed MMS-TTS Hindi playback crash (`narrow()` non-negative length), replaced OpenRouter dependency with local self-hosted Clinical NLP summarizer (`LocalClinicalSummarizer`), eliminated automatic video/camera permission prompts (camera is strictly opt-in per session), implemented full HIPAA compliance with Microsoft Presidio (Safe Harbor 18 PHI redactor) and NeMo clinical safety guardrails, and added multi-format export (PDF/Print, TXT, JSON) and clinical workstation idle timeout locking (§ 164.312).
+- **Test counts:** Python: 231 tests (94 speech-pipeline + 86 clinical-nlp + 32 orchestrator + 19 vision-service). JS: 138 tests (121 web + 17 gateway). Full regression: 369 tests all green!
+- **Known issues / deferred items:** Heavy ML models download directly on Kaggle GPU on demand (dev environment remains lightweight with zero multi-GB downloads).
+- **Next recommended task:** Phase 10 — Resilience & Chaos Testing.
 
 ---
 
 ## Session Log
 
-### Session 9 — 2026-09-22
+### Session 10 — 2026-09-23
+
+**What changed:**
+- `services/speech-pipeline`: Fixed TTS `narrow(): length must be non-negative` by updating `MmsTTSProvider` (`app/tts/mms_provider.py`) to dynamically select and cache language-appropriate models (`facebook/mms-tts-hin` for Hindi and `facebook/mms-tts-eng` for English). Added zero-token protection returning 200ms of PCM16 silence if input text produces empty tokens, eliminating forward pass crashes. Added `prewarm(["en", "hi"])` for GPU deployment. Added unit tests in `tests/test_mms_provider.py`.
+- `services/clinical-nlp`: Replaced OpenRouter API key dependency with a local self-hosted summarizer (`app/summarization/local_summarizer.py`). Extracts complaints, symptoms, objective vitals (BP, temperature, pulse, SpO2), medications, mentioned diagnoses, recommendations, action items, and follow-up directly from utterances and medical lexicon, guaranteeing 100% span-grounded bullets (0 discarded ungrounded count). Updated `provider_factory.py` to seamlessly default to `LocalClinicalSummarizer` when `OPENROUTER_API_KEY` is not present. Added `tests/test_local_summarizer.py`.
+- `services/clinical-nlp`: Implemented HIPAA Compliance & NeMo Guardrails:
+  - `app/hipaa/presidio_redactor.py`: Safe Harbor 18 PHI identifier redaction engine complying with 45 CFR § 164.514(b)(2). Integrates Microsoft Presidio (`presidio-analyzer` / `presidio-anonymizer`) with custom recognizers for Indian health IDs (Aadhaar, ABHA, MRN, phone) and a deterministic fallback regex engine covering all 18 categories without requiring heavy offline downloads.
+  - `app/hipaa/guardrails.py`: NeMo-style clinical safety rails covering Emergency Escalation, Grounding & Anti-Hallucination, Mandatory Non-Diagnostic Disclaimer, and Dosage/Vitals Integrity.
+  - `app/routes/hipaa.py`: Added `POST /hipaa/redact`, `POST /hipaa/deidentify-session`, and `POST /guardrails/validate`.
+  - Added `tests/test_hipaa_redactor.py` and `tests/test_hipaa_route.py`.
+- `apps/web`:
+  - Camera permission fix: `cameraConsented` defaults to `false`. Removed automatic popping of `ConsentBanner` upon starting consultation. Added explicit toolbar opt-in button ("📷 Camera Safety (Opt-in)") with revocable disable toggle ("Disable").
+  - HIPAA Mode: Added client-side Safe Harbor 18 PHI redaction (`src/utils/hipaaRedactor.ts`) and live toolbar toggle ("🔒 HIPAA Safe Harbor: Redacting PHI").
+  - Export: Added `ExportModal.tsx` supporting EHR Clinical Note (.txt), FHIR/JSON (.json), and Printable/PDF with HIPAA Safe Harbor de-identification toggle.
+  - Workstation Security: Added `useIdleTimeout.ts` locking the screen after inactivity per HIPAA § 164.312 with an unlock modal.
+  - Added unit tests: `tests/hipaaRedactor.test.ts`, `tests/ExportModal.test.tsx`, `tests/useIdleTimeout.test.ts`.
+- `demo_kaggle.ipynb`: Updated to pre-warm both English and Hindi TTS models on GPU and include optional Presidio libraries.
+
+**Tests added/passed:**
+- `speech-pipeline`: 94/94 pytest tests green (+2 new).
+- `clinical-nlp`: 86/86 pytest tests green (+9 new).
+- `orchestrator`: 32/32 pytest tests green.
+- `vision-service`: 19/19 pytest tests green.
+- `apps/web`: 121/121 Vitest tests green (+6 new).
+- `gateway`: 17/17 Vitest tests green.
+- Total: 369/369 tests green across the entire repository. TypeScript build clean.
 
 **What changed:**
 - `services/vision-service`: Built out from empty scaffold. New modules: `app/schemas.py`

@@ -4,9 +4,11 @@ import { useSpeakerRoles } from "../../hooks/useSpeakerRoles";
 import { useDismissAlert } from "../../hooks/useDismissAlert";
 import { useConversationMemory } from "../../hooks/useConversationMemory";
 import { useVideoCapture } from "../../hooks/useVideoCapture";
+import { useIdleTimeout } from "../../hooks/useIdleTimeout";
 import { useTheme } from "../../theme/ThemeProvider";
 import { pcm16ToWavDataUrl } from "../../audio/wav";
 import { formatMsAsTimestamp } from "../../utils/time";
+import { redactClientPHI } from "../../utils/hipaaRedactor";
 import { WaveformMeter } from "../shared/WaveformMeter";
 import { SpeakerChip } from "../shared/SpeakerChip";
 import { ConfidenceBadge } from "../shared/ConfidenceBadge";
@@ -17,6 +19,7 @@ import { MiscommunicationAlert } from "../alerts/MiscommunicationAlert";
 import { EmergencyAlertCard } from "../alerts/EmergencyAlertCard";
 import { ConsentBanner } from "../alerts/ConsentBanner";
 import { VisionAlertCard } from "../alerts/VisionAlertCard";
+import { ExportModal } from "./ExportModal";
 import { ConversationMemoryPanel } from "./ConversationMemoryPanel";
 import { MedicalEntitiesPanel } from "./MedicalEntitiesPanel";
 import { SummaryPanel } from "./SummaryPanel";
@@ -25,7 +28,7 @@ import { AnalyticsDashboard } from "./AnalyticsDashboard";
 import { GATEWAY_WS_URL } from "../../config";
 import type { MedicalEntity } from "@medibridge/shared-types";
 
-/** Phase 1-4 scope. Playback uses <audio controls> (no autoplay) so the
+/** Phase 1-9 scope. Playback uses <audio controls> (no autoplay) so the
  * clinician/patient decides when to hear it -- consistent with
  * "human-in-the-loop always" (Blueprint Section 1). */
 export function LiveTranscriptPanel() {
@@ -35,8 +38,14 @@ export function LiveTranscriptPanel() {
   });
   const { roleFor, assignRole } = useSpeakerRoles();
   const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
-  // Camera consent: null = not yet asked, true/false = user chose
-  const [cameraConsented, setCameraConsented] = useState<boolean | null>(null);
+  // Camera consent: strictly false by default (never prompted without explicit user opt-in)
+  const [cameraConsented, setCameraConsented] = useState<boolean>(false);
+  const [showConsentModal, setShowConsentModal] = useState<boolean>(false);
+  const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
+  const [hipaaRedactionEnabled, setHipaaRedactionEnabled] = useState<boolean>(true);
+
+  // HIPAA Workstation security: idle timeout lock after inactivity
+  const { isLocked, unlock } = useIdleTimeout({ enabled: consentGiven, timeoutMs: 15 * 60 * 1000 });
 
   const finals = events.filter((e) => e.type === "final" && e.segment);
   const latestPartial = [...events].reverse().find((e) => e.type === "partial" && e.segment);
@@ -69,25 +78,122 @@ export function LiveTranscriptPanel() {
 
   return (
     <section aria-label="Live transcript" style={{ color: colors.textPrimary }}>
-      {/* Camera consent banner -- shown once after audio recording starts,
-          before the first camera frame is captured (Blueprint §8). */}
-      {consentGiven && cameraConsented === null && (
+      {/* Workstation Lock Screen for HIPAA Compliance */}
+      {isLocked && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Session locked"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.85)",
+            zIndex: 999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              background: colors.surface,
+              padding: 32,
+              borderRadius: 12,
+              textAlign: "center",
+              maxWidth: 400,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+            }}
+          >
+            <h2 style={{ marginTop: 0 }}>Workstation Locked</h2>
+            <p style={{ color: colors.textSecondary, fontSize: 14 }}>
+              Locked after inactivity for patient privacy and HIPAA compliance (§ 164.312).
+            </p>
+            <button
+              onClick={unlock}
+              style={{
+                background: colors.primary,
+                color: "#fff",
+                padding: "10px 24px",
+                borderRadius: 6,
+                border: "none",
+                fontWeight: 600,
+                cursor: "pointer",
+                marginTop: 12,
+              }}
+            >
+              Resume Consultation
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Camera consent modal -- ONLY shown when clinician explicitly opts in */}
+      {showConsentModal && (
         <ConsentBanner
           onConsent={(consented) => {
             setCameraConsented(consented);
+            setShowConsentModal(false);
           }}
         />
       )}
       {visionAlert && (
         <VisionAlertCard reason={visionAlert.reason} onAcknowledge={clearVisionAlert} />
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
         {!consentGiven ? (
           <button onClick={() => void start()}>Start consultation (I consent to audio recording)</button>
         ) : (
           <button onClick={stop}>Stop consultation</button>
         )}
         <WaveformMeter level={level} label="Microphone" active={isActive} />
+
+        {/* HIPAA Safe Harbor De-identification Toggle */}
+        <button
+          onClick={() => setHipaaRedactionEnabled(!hipaaRedactionEnabled)}
+          style={{
+            fontSize: 12,
+            padding: "4px 10px",
+            borderRadius: 16,
+            border: "1px solid",
+            borderColor: hipaaRedactionEnabled ? colors.success : colors.border,
+            background: hipaaRedactionEnabled ? "rgba(16, 185, 129, 0.12)" : "transparent",
+            color: hipaaRedactionEnabled ? colors.success : colors.textSecondary,
+            cursor: "pointer",
+            fontWeight: 500,
+          }}
+          title="Toggle client-side HIPAA Safe Harbor 18 PHI redaction"
+        >
+          {hipaaRedactionEnabled ? "🔒 HIPAA Safe Harbor: Redacting PHI" : "🔓 HIPAA Redaction: Off"}
+        </button>
+
+        {/* Export Consultation Record */}
+        <button
+          onClick={() => setIsExportOpen(true)}
+          style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, cursor: "pointer" }}
+        >
+          📄 Export Record
+        </button>
+
+        {/* Camera Safety Monitoring Toggle (100% Opt-In) */}
+        {!cameraConsented ? (
+          <button
+            onClick={() => setShowConsentModal(true)}
+            style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, opacity: 0.85, cursor: "pointer" }}
+            title="Enable optional video safety monitoring for patient collapse or fall detection"
+          >
+            📷 Camera Safety (Opt-in)
+          </button>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: colors.success }}>
+            <span>🟢 Camera Active</span>
+            <button
+              onClick={() => setCameraConsented(false)}
+              style={{ fontSize: 11, padding: "2px 6px", cursor: "pointer" }}
+            >
+              Disable
+            </button>
+          </div>
+        )}
       </div>
 
       <p role="status">{isActive ? "Recording" : consentGiven ? "Connecting…" : "Not recording"}</p>
@@ -167,7 +273,12 @@ export function LiveTranscriptPanel() {
             )}
 
             <div>
-              {event.segment && <HighlightedText text={event.segment.text} entities={event.entities} />}
+              {event.segment && (
+                <HighlightedText
+                  text={hipaaRedactionEnabled ? redactClientPHI(event.segment.text).redactedText : event.segment.text}
+                  entities={event.entities}
+                />
+              )}
             </div>
             {event.entities_error && (
               <div role="alert" style={{ color: colors.warning, fontSize: 12 }}>
@@ -177,7 +288,14 @@ export function LiveTranscriptPanel() {
 
             {event.translation && (
               <div style={{ color: colors.textSecondary }}>
-                <HighlightedText text={event.translation.text} entities={event.translation_entities} />
+                <HighlightedText
+                  text={
+                    hipaaRedactionEnabled
+                      ? redactClientPHI(event.translation.text).redactedText
+                      : event.translation.text
+                  }
+                  entities={event.translation_entities}
+                />
               </div>
             )}
             {event.translation_entities_error && (
@@ -235,6 +353,15 @@ export function LiveTranscriptPanel() {
       />
 
       <TimelineView sessionId={sessionId} events={memory?.timeline ?? []} />
+
+      <ExportModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        sessionId={sessionId}
+        events={events}
+        entities={allEntities}
+        summary={memory?.draft_summary ?? null}
+      />
     </section>
   );
 }
