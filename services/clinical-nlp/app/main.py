@@ -23,6 +23,23 @@ _risk_store = RiskHistoryStore()
 app.include_router(create_risk_router(lambda: _risk_store))
 
 
+@app.on_event("startup")
+async def _warmup() -> None:
+    import asyncio, logging
+    from concurrent.futures import ThreadPoolExecutor
+    log = logging.getLogger(__name__)
+
+    def _load() -> None:
+        log.info("loading similarity model in background...")
+        try:
+            get_similarity_provider()
+            log.info("similarity model ready")
+        except Exception as exc:
+            log.warning("similarity model unavailable at startup: %s", exc)
+
+    asyncio.get_event_loop().run_in_executor(ThreadPoolExecutor(max_workers=1), _load)
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", service=SERVICE_NAME, version=SERVICE_VERSION)
