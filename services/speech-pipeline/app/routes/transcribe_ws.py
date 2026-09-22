@@ -101,31 +101,47 @@ def create_transcribe_router(
 
         import asyncio as _asyncio
         _loop = _asyncio.get_event_loop()
+        _send_queue: _asyncio.Queue[TranscriptEvent | None] = _asyncio.Queue()
+
+        async def _reader() -> None:
+            """Reads audio chunks continuously so the TCP buffer never stalls."""
+            try:
+                while True:
+                    chunk = await websocket.receive_bytes()
+                    for ev in await _loop.run_in_executor(None, session.push_chunk, chunk):
+                        await _send_queue.put(ev)
+            except WebSocketDisconnect:
+                pass
+            finally:
+                await _send_queue.put(None)  # sentinel
+
+        _asyncio.ensure_future(_reader())
 
         last_risk_level: RiskLevel | None = None
         try:
             while True:
-                chunk = await websocket.receive_bytes()
-                for event in await _loop.run_in_executor(None, session.push_chunk, chunk):
-                    event = event.model_copy(update={"session_id": session_id})
-                    event = await _enrich_final_event(
-                        event,
-                        get_mt_provider,
-                        get_tts_provider,
-                        get_miscommunication_checker,
-                        get_entity_extractor,
-                        get_emergency_detector,
-                        get_emotion_classifier,
-                        get_risk_scorer,
-                        session,
-                        diarizer,
-                        diarizer_error,
-                    )
-                    await websocket.send_json(event.model_dump())
-                    await _record_utterance(event, session_id, get_orchestrator_client)
-                    last_risk_level = await _record_timeline_events(
-                        event, session_id, get_orchestrator_client, last_risk_level
-                    )
+                raw_event = await _send_queue.get()
+                if raw_event is None:
+                    break
+                event = raw_event.model_copy(update={"session_id": session_id})
+                event = await _enrich_final_event(
+                    event,
+                    get_mt_provider,
+                    get_tts_provider,
+                    get_miscommunication_checker,
+                    get_entity_extractor,
+                    get_emergency_detector,
+                    get_emotion_classifier,
+                    get_risk_scorer,
+                    session,
+                    diarizer,
+                    diarizer_error,
+                )
+                await websocket.send_json(event.model_dump())
+                await _record_utterance(event, session_id, get_orchestrator_client)
+                last_risk_level = await _record_timeline_events(
+                    event, session_id, get_orchestrator_client, last_risk_level
+                )
         except WebSocketDisconnect:
             for event in session.flush():
                 # Nothing to send to a disconnected client; this exercises
