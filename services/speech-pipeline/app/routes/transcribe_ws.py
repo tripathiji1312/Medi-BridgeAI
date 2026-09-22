@@ -67,8 +67,11 @@ def create_transcribe_router(
         # (RBAC) is where a real session identity gets threaded through.
         session_id = uuid.uuid4().hex
 
+        import asyncio
+
+        loop = asyncio.get_event_loop()
         try:
-            provider = get_provider()
+            provider = await loop.run_in_executor(None, get_provider)
         except RuntimeError as exc:
             # Fail loud, not silent (Blueprint Section 1 Principle 3): tell
             # the client ASR is unavailable instead of accepting audio that
@@ -91,7 +94,7 @@ def create_transcribe_router(
         diarizer_error: str | None = None
         if get_embedding_provider is not None:
             try:
-                diarizer = SpeakerDiarizer(get_embedding_provider())
+                diarizer = SpeakerDiarizer(await loop.run_in_executor(None, get_embedding_provider))
             except Exception as exc:  # noqa: BLE001 - degrade, don't crash the session
                 logger.exception("diarization unavailable for this session")
                 diarizer_error = str(exc)

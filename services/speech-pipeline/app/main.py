@@ -19,6 +19,39 @@ SERVICE_NAME = "speech-pipeline"
 SERVICE_VERSION = "0.1.0"
 
 app = FastAPI(title=SERVICE_NAME)
+
+
+@app.on_event("startup")
+async def _warmup() -> None:
+    # Warm up providers in a background thread so uvicorn finishes startup
+    # immediately and the health endpoint responds while the model downloads.
+    # The first WebSocket connection will still have to wait if it arrives
+    # before the model finishes loading, but it won't time out — lru_cache
+    # means subsequent calls return instantly.
+    import asyncio
+    import logging
+    from concurrent.futures import ThreadPoolExecutor
+
+    log = logging.getLogger(__name__)
+
+    def _load() -> None:
+        log.info("loading models in background (may take a minute on first run)...")
+        for name, fn in [
+            ("ASR", get_asr_provider),
+            ("MT", get_mt_provider),
+            ("TTS", get_tts_provider),
+            ("diarization", get_embedding_provider),
+        ]:
+            try:
+                fn()
+                log.info("%s provider ready", name)
+            except Exception as exc:
+                log.warning("%s provider unavailable at startup: %s", name, exc)
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(ThreadPoolExecutor(max_workers=1), _load)
+
+
 app.include_router(
     create_transcribe_router(
         get_asr_provider,
