@@ -31,8 +31,8 @@ class InteractionRule:
 
 _RULES: list[InteractionRule] = [
     InteractionRule(
-        group_a=("warfarin", "coumadin", "heparin", "dabigatran", "rivaroxaban", "apixaban"),
-        group_b=("aspirin", "ibuprofen", "naproxen", "diclofenac", "ketorolac", "nsaid", "nsaids", "indomethacin"),
+        group_a=("warfarin", "coumadin", "heparin", "dabigatran", "rivaroxaban", "apixaban", "varsurin", "warfare", "warfar"),
+        group_b=("aspirin", "ibuprofen", "naproxen", "diclofenac", "ketorolac", "nsaid", "nsaids", "indomethacin", "primitive"),
         severity="CRITICAL",
         mechanism="Concurrent antiplatelet/NSAID mucosal injury and systemic anticoagulation",
         clinical_risk="Severe gastrointestinal hemorrhage, major systemic bleeding events",
@@ -98,7 +98,7 @@ _RULES: list[InteractionRule] = [
 
 # Common allergy families and cross-reacting drugs
 _ALLERGY_FAMILIES: dict[str, tuple[str, ...]] = {
-    "penicillin": ("penicillin", "amoxicillin", "ampicillin", "augmentin", "amox-clav", "piperacillin", "amoxil"),
+    "penicillin": ("penicillin", "amoxicillin", "ampicillin", "augmentin", "amox-clav", "piperacillin", "amoxil", "palicillin", "hemocillin", "palestinine", "palisthenic"),
     "sulfa": ("bactrim", "septra", "cotrimoxazole", "sulfamethoxazole", "sulfadiazine", "sulfa"),
     "cephalosporin": ("cephalexin", "cefuroxime", "ceftriaxone", "cefixime", "cefotaxime", "cefazolin"),
     "aspirin": ("aspirin", "ecosprin", "disprin"),
@@ -111,7 +111,9 @@ _ALLERGY_PATTERNS = [
     re.compile(r"\b([a-z\-]+)\s+(?:se\s+)?allergy\s+hai\b", re.IGNORECASE),
     re.compile(r"\breaction\s+(?:to\s+)?([a-z\-]+)\b", re.IGNORECASE),
     re.compile(r"\bcannot\s+take\s+([a-z\-]+)\b", re.IGNORECASE),
+    re.compile(r"\b([a-z\-]+)\s+allergy\b", re.IGNORECASE),
 ]
+
 
 
 def _normalize(name: str) -> str:

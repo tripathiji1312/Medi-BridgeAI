@@ -32,10 +32,11 @@ _SUMMARY_SCHEMA_FIELDS = (
 )
 
 # Regex patterns for clinical extraction
-_BP_PATTERN = re.compile(r"\b(?:bp|blood\s*pressure)?\s*(\d{2,3}/\d{2,3})\s*(?:mm\s*hg)?\b", re.IGNORECASE)
-_TEMP_PATTERN = re.compile(r"\b(?:temp(?:erature)?|fever)?\s*(\d{2,3}(?:\.\d+)?)\s*(?:deg(?:rees)?|[°\s]?[fc])\b", re.IGNORECASE)
-_PULSE_PATTERN = re.compile(r"\b(?:pulse|heart\s*rate|hr)\s*(?:is|of|:)?\s*(\d{2,3})\s*(?:bpm)?\b", re.IGNORECASE)
-_SPO2_PATTERN = re.compile(r"\b(?:spo2|oxygen|o2|sat(?:uration)?)\s*(?:is|of|:)?\s*(\d{2,3})\s*%?\b", re.IGNORECASE)
+_BP_PATTERN = re.compile(r"\b(?:bp|blood\s*pressure)?\s*(?:is\s*)?(\d{2,3}(?:\s*(?:[/]|over)\s*)\d{2,3})\s*(?:mm\s*hg)?\b", re.IGNORECASE)
+_TEMP_PATTERN = re.compile(r"\b(?:temp(?:erature)?|fever)?\s*(?:is|at|of)?\s*(\d{2,3}(?:\.\d+)?)\s*(?:deg(?:rees)?\s*(?:fahrenheit|celsius|f|c)?|[°\s]?[fc]|fahrenheit|celsius)\b", re.IGNORECASE)
+_PULSE_PATTERN = re.compile(r"(?:\b(?:pulse(?:\s*rate)?|heart\s*rate|hr)\s*(?:is|if|of|:)?\s*(\d{2,3})|\b(\d{2,3})\s*(?:bpm|beats\s*(?:per\s*min(?:ute)?|\/min)?))\b", re.IGNORECASE)
+_SPO2_PATTERN = re.compile(r"\b(?:spo2|oxygen|o2|sat(?:uration)?)\s*(?:is|if|of|:)?\s*(\d{2,3})\s*%?\b", re.IGNORECASE)
+
 
 _COMPLAINT_KEYWORDS = (
     "pain", "hurts", "ache", "swelling", "discomfort", "problem", "complaint",

@@ -15,10 +15,11 @@ export interface LiveVitalsStripProps {
   onVitalsChange?: (vitals: VitalsData) => void;
 }
 
-const BP_REGEX = /\b(?:bp|blood\s*pressure)?\s*(\d{2,3})[\s/]+(\d{2,3})\s*(?:mm\s*hg)?\b/i;
-const SPO2_REGEX = /\b(?:spo2|oxygen|o2|sat(?:uration)?)\s*(?:is|of|:|at)?\s*(\d{2,3})\s*%?\b/i;
-const HR_REGEX = /(?:\b(?:pulse(?:\s*rate)?|heart\s*rate|hr)\s*(?:is|of|:|at)?\s*(\d{2,3})|\b(\d{2,3})\s*(?:bpm|beats\s*per\s*min))\b/i;
-const TEMP_REGEX = /\b(?:temp(?:erature)?|fever)?\s*(\d{2,3}(?:\.\d+)?)\s*(?:deg(?:rees)?|[°\s]?[fc])\b/i;
+const BP_REGEX = /\b(?:bp|blood\s*pressure)?\s*(?:is\s*)?(\d{2,3})\s*(?:[\s/]|over)\s*(\d{2,3})\s*(?:mm\s*hg)?\b/i;
+const SPO2_REGEX = /\b(?:spo2|oxygen|o2|sat(?:uration)?)\s*(?:is|if|of|:|at)?\s*(\d{2,3})\s*%?\b/i;
+const HR_REGEX = /(?:\b(?:pulse(?:\s*rate)?|heart\s*rate|hr)\s*(?:is|if|of|:|at)?\s*(\d{2,3})|\b(\d{2,3})\s*(?:bpm|beats\s*(?:per\s*min(?:ute)?|\/min)?))\b/i;
+const TEMP_REGEX = /\b(?:temp(?:erature)?|fever)?\s*(?:is|at|of)?\s*(\d{2,3}(?:\.\d+)?)\s*(?:deg(?:rees)?\s*(?:fahrenheit|celsius|f|c)?|[°\s]?[fc]|fahrenheit|celsius)\b/i;
+
 
 export function extractVitalsFromSpeech(utterances: string[]): VitalsData {
   const result: VitalsData = {};

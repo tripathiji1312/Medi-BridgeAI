@@ -92,9 +92,21 @@ class NeuralClinicalNERProvider:
                     continue
 
             word = str(r.get("word", "")).strip()
+            clean_word = word.lstrip("#").strip()
+            # Discard subword fragments, numbers, or short words
+            if len(clean_word) < 3 or clean_word.isdigit():
+                continue
+            # RoBERTa biomedical model operates on English; discard isolated non-Latin script artifacts
+            if not any(c.isalpha() and c.isascii() for c in clean_word):
+                continue
+
             score = float(r.get("score", 0.8))
             start = int(r.get("start", 0))
             end = int(r.get("end", start + len(word)))
+            entity_text = text[start:end] if 0 <= start < end <= len(text) else clean_word
+            if len(entity_text.strip()) < 3:
+                continue
+
 
             entities.append(
                 MedicalEntity(
