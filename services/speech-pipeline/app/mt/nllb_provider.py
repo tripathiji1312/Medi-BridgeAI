@@ -42,9 +42,9 @@ class NLLBTranslationProvider(MTProvider):
         self._tokenizer = AutoTokenizer.from_pretrained(model_name)
         self._model = AutoModelForSeq2SeqLM.from_pretrained(
             model_name,
-            torch_dtype=self._dtype,
-            low_cpu_mem_usage=False,
-        ).to(self._device)
+            dtype=self._dtype,
+            device_map={"": self._device},
+        )
         self._model.eval()
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationSegment:
