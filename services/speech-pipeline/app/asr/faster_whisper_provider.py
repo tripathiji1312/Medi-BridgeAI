@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 EXPECTED_SAMPLE_RATE = 16_000
 
 
+DEFAULT_INITIAL_PROMPT = (
+    "Medical clinical consultation between doctor and patient: blood pressure, SpO2, heart rate, "
+    "temperature, mmHg, bpm, Warfarin, Aspirin, Penicillin, Amoxicillin, Paracetamol, "
+    "Azithromycin, Lisinopril, allergy, chest pain, dizziness, headache."
+)
+
+
 class FasterWhisperASRProvider(ASRProvider):
     def __init__(
         self,
@@ -27,6 +34,7 @@ class FasterWhisperASRProvider(ASRProvider):
         device: str = "cpu",
         compute_type: str = "int8",
         language: str | None = None,
+        initial_prompt: str | None = None,
     ) -> None:
         try:
             from faster_whisper import WhisperModel
@@ -44,6 +52,7 @@ class FasterWhisperASRProvider(ASRProvider):
         )
         self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
         self._language = language
+        self._initial_prompt = initial_prompt if initial_prompt is not None else DEFAULT_INITIAL_PROMPT
 
     def transcribe(self, pcm16_mono: bytes, sample_rate: int) -> list[TranscriptSegment]:
         if sample_rate != EXPECTED_SAMPLE_RATE:
@@ -61,9 +70,14 @@ class FasterWhisperASRProvider(ASRProvider):
         segments, info = self._model.transcribe(
             audio,
             language=self._language,
+            initial_prompt=self._initial_prompt,
+            condition_on_previous_text=False,
+            beam_size=5,
+            temperature=0.0,
             vad_filter=False,
             word_timestamps=False,
         )
+
 
         results: list[TranscriptSegment] = []
         for seg in segments:

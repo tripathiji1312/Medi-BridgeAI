@@ -47,10 +47,13 @@ def get_asr_provider() -> ASRProvider:
 
     asr_lang = os.environ.get("ASR_LANGUAGE", "")
     language = None if asr_lang in ("", "auto") else asr_lang
+    initial_prompt = os.environ.get("ASR_INITIAL_PROMPT")
 
     return FasterWhisperASRProvider(
         model_size=model_size,
         device=device,
         compute_type=compute_type,
         language=language,
+        initial_prompt=initial_prompt,
     )
+
