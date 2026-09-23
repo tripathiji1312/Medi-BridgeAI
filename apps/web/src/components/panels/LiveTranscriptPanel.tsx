@@ -69,7 +69,7 @@ export function LiveTranscriptPanel() {
     summaryError,
     isGeneratingSummary,
   } = useConversationMemory(sessionId, finals.length);
-  const { alert: visionAlert, clearAlert: clearVisionAlert, mediaStream } = useVideoCapture({
+  const { alert: visionAlert, clearAlert: clearVisionAlert, mediaStream, facePosition } = useVideoCapture({
     sessionId,
     enabled: cameraConsented === true,
   });
@@ -181,6 +181,7 @@ export function LiveTranscriptPanel() {
         <VideoMonitorPanel
           stream={mediaStream}
           onDisable={() => setCameraConsented(false)}
+          facePosition={facePosition}
         />
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
