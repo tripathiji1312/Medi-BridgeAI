@@ -47,26 +47,69 @@ class MmsTTSProvider(TTSProvider):
             return self._models[lang_key]
 
         target_model = self._default_model_name or LANGUAGE_MODELS.get(lang_key, "facebook/mms-tts-eng")
-        tokenizer = AutoTokenizer.from_pretrained(target_model)
-        model = VitsModel.from_pretrained(target_model).to(self._device)
-        sample_rate: int = model.config.sampling_rate
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(target_model)
+            model = VitsModel.from_pretrained(target_model).to(self._device)
+        except Exception:
+            # Fallback to english checkpoint if language-specific model fails to load
+            target_model = "facebook/mms-tts-eng"
+            tokenizer = AutoTokenizer.from_pretrained(target_model)
+            model = VitsModel.from_pretrained(target_model).to(self._device)
 
+        sample_rate: int = getattr(model.config, "sampling_rate", 16000)
         self._models[lang_key] = (tokenizer, model, sample_rate)
         return tokenizer, model, sample_rate
 
     def prewarm(self, languages: list[str] | None = None) -> None:
-        langs = languages or ["en", "hi"]
+        langs = languages or ["en"]
         for lang in langs:
-            self._get_model_assets(lang)
+            try:
+                self._get_model_assets(lang)
+            except Exception:
+                pass
+
 
     def synthesize(self, text: str, language: str) -> TTSAudioSegment:
         import numpy as np
         import torch
 
-        tokenizer, model, sample_rate = self._get_model_assets(language)
+        try:
+            tokenizer, model, sample_rate = self._get_model_assets(language)
 
-        clean_text = text.strip() if text else ""
-        if not clean_text:
+            clean_text = text.strip() if text else ""
+            if not clean_text:
+                silence = np.zeros(int(sample_rate * 0.2), dtype=np.int16).tobytes()
+                return TTSAudioSegment(
+                    audio_base64=base64.b64encode(silence).decode("ascii"),
+                    sample_rate=sample_rate,
+                    format="pcm16",
+                )
+
+            inputs = tokenizer(clean_text, return_tensors="pt").to(self._device)
+
+            # Guard against zero-token inputs which cause torch.narrow() to fail
+            if inputs.input_ids is None or inputs.input_ids.shape[-1] == 0:
+                silence = np.zeros(int(sample_rate * 0.2), dtype=np.int16).tobytes()
+                return TTSAudioSegment(
+                    audio_base64=base64.b64encode(silence).decode("ascii"),
+                    sample_rate=sample_rate,
+                    format="pcm16",
+                )
+
+            with torch.no_grad():
+                output = model(**inputs).waveform
+
+            waveform = output.squeeze().detach().cpu().numpy()
+            clamped = np.clip(waveform, -1.0, 1.0)
+            pcm16 = (clamped * 32767).astype(np.int16).tobytes()
+
+            return TTSAudioSegment(
+                audio_base64=base64.b64encode(pcm16).decode("ascii"),
+                sample_rate=sample_rate,
+                format="pcm16",
+            )
+        except Exception:
+            sample_rate = 16000
             silence = np.zeros(int(sample_rate * 0.2), dtype=np.int16).tobytes()
             return TTSAudioSegment(
                 audio_base64=base64.b64encode(silence).decode("ascii"),
@@ -74,26 +117,3 @@ class MmsTTSProvider(TTSProvider):
                 format="pcm16",
             )
 
-        inputs = tokenizer(clean_text, return_tensors="pt").to(self._device)
-
-        # Guard against zero-token inputs which cause torch.narrow() to fail
-        if inputs.input_ids is None or inputs.input_ids.shape[-1] == 0:
-            silence = np.zeros(int(sample_rate * 0.2), dtype=np.int16).tobytes()
-            return TTSAudioSegment(
-                audio_base64=base64.b64encode(silence).decode("ascii"),
-                sample_rate=sample_rate,
-                format="pcm16",
-            )
-
-        with torch.no_grad():
-            output = model(**inputs).waveform
-
-        waveform = output.squeeze().detach().cpu().numpy()
-        clamped = np.clip(waveform, -1.0, 1.0)
-        pcm16 = (clamped * 32767).astype(np.int16).tobytes()
-
-        return TTSAudioSegment(
-            audio_base64=base64.b64encode(pcm16).decode("ascii"),
-            sample_rate=sample_rate,
-            format="pcm16",
-        )
