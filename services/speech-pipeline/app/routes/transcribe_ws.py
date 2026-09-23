@@ -128,6 +128,11 @@ def create_transcribe_router(
                         await _send_queue.put(ev)
             except WebSocketDisconnect:
                 pass
+            except RuntimeError as exc:
+                if "not connected" in str(exc).lower():
+                    logger.info("session %s: client disconnected", session_id[:8])
+                else:
+                    logger.exception("_reader task encountered error: %s", exc)
             except Exception:
                 logger.exception("_reader task died unexpectedly")
             finally:
