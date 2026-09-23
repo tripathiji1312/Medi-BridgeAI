@@ -27,6 +27,16 @@ DEFAULT_INITIAL_PROMPT = (
 )
 
 
+MODEL_ALIASES: dict[str, str] = {
+    "large-v4": "large-v3",
+    "large_v4": "large-v3",
+    "v4": "large-v3",
+    "turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+    "large-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+}
+
+
 class FasterWhisperASRProvider(ASRProvider):
     def __init__(
         self,
@@ -46,13 +56,15 @@ class FasterWhisperASRProvider(ASRProvider):
                 "ASR provider; otherwise use FixtureASRProvider for tests."
             ) from exc
 
+        resolved_model = MODEL_ALIASES.get(model_size.lower().strip(), model_size)
         logger.info(
-            "Initializing FasterWhisper (model=%s, device=%s, compute=%s, lang=%s)",
-            model_size, device, compute_type, language,
+            "Initializing FasterWhisper (requested=%s, resolved=%s, device=%s, compute=%s, lang=%s)",
+            model_size, resolved_model, device, compute_type, language,
         )
-        self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        self._model = WhisperModel(resolved_model, device=device, compute_type=compute_type)
         self._language = language
         self._initial_prompt = initial_prompt if initial_prompt is not None else DEFAULT_INITIAL_PROMPT
+
 
     def transcribe(self, pcm16_mono: bytes, sample_rate: int) -> list[TranscriptSegment]:
         if sample_rate != EXPECTED_SAMPLE_RATE:
