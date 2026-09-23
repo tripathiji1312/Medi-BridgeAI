@@ -87,10 +87,11 @@ export function LiveTranscriptPanel() {
   useEffect(() => {
     const meds = allEntities
       .filter((e) => e.category === "medication")
-      .map((e) => e.canonical_name || e.text);
-    const patientUtterances = finals
-      .filter((f) => roleFor(f.speaker?.speaker_label ?? "") === "patient")
-      .map((f) => f.segment?.text || "");
+      .map((e) => (e.canonical_name || e.text).replace(/^#+/, "").trim())
+      .filter((m) => m.length >= 3);
+    // Use all utterances for allergy detection — roles are often unassigned
+    // so filtering to "patient" only would always produce an empty list.
+    const patientUtterances = finals.map((f) => f.segment?.text || "");
 
     if (meds.length > 0 || patientUtterances.length > 0) {
       fetch(`${GATEWAY_HTTP_URL}/cds/check-interactions`, {

@@ -21,9 +21,9 @@ EXPECTED_SAMPLE_RATE = 16_000
 
 
 DEFAULT_INITIAL_PROMPT = (
-    "Medical clinical consultation between doctor and patient: blood pressure, SpO2, heart rate, "
-    "temperature, mmHg, bpm, Warfarin, Aspirin, Penicillin, Amoxicillin, Paracetamol, "
-    "Azithromycin, Lisinopril, allergy, chest pain, dizziness, headache."
+    "Medical clinical consultation between doctor and patient. "
+    "Topics: blood pressure, SpO2, heart rate, temperature, mmHg, bpm, "
+    "allergies, chest pain, dizziness, headache, medications, dosage."
 )
 
 
